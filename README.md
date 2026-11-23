@@ -1,0 +1,105 @@
+# OKG Chat
+
+PWA-Chat, dessen Prompt vor dem Modellaufruf mit Wikidata und DBpedia
+angereichert wird. Das Modell bekommt Werkzeuge, sucht Entitäten, schreibt
+SPARQL, zählt und zeichnet Grafiken. Jede Zahl in der Antwort stammt aus einem
+Werkzeugergebnis desselben Turns.
+
+```
+Browser (PWA)  --POST /api/chat-->  BFF  --ChatOpenAI-->  kiconnect.nrw
+                                     |
+                                     +--> query.wikidata.org
+                                     +--> dbpedia.org/sparql, lookup.dbpedia.org
+```
+
+## Starten
+
+```bash
+cp .env.example .env       # KICONNECT_API_KEY eintragen
+npm install
+npm run dev                # BFF auf 8787, Vite auf 5173
+```
+
+Oder als Container:
+
+```bash
+podman build -t okg-pwa .
+podman run --rm -p 8080:8787 --env-file .env okg-pwa
+```
+
+Die PWA lässt sich nur über `localhost` oder HTTPS installieren; ein Aufruf über
+`http://<lan-ip>` zeigt die App, aber ohne Installationsangebot. Das ist eine
+Browser-Regel, keine Einstellung.
+
+## Endpunkte
+
+| Pfad | Zweck |
+|---|---|
+| `POST /api/chat` | Chatlauf als Server-Sent Events (`token`, `tool`, `chart`, `sources`, `done`, `error`) |
+| `GET /api/health` | Modell, Endpunkt, Budget |
+| `GET /api/models` | Modellliste des Gateways, 60 s zwischengespeichert |
+
+Der BFF ist kein öffentlicher OpenAI-Proxy: es gibt bewusst kein
+`/v1/chat/completions`. Der Key bleibt serverseitig, der Browser sieht ihn nie.
+Ein Rate-Limit von 15 Anfragen pro Minute und IP schützt den geteilten Gateway-Key.
+
+## Konfiguration
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `KICONNECT_BASE_URL` | `https://chat.kiconnect.nrw/api/v1` | OpenAI-kompatibler Endpunkt |
+| `KICONNECT_API_KEY` | – | Pflicht, nur im Backend |
+| `OKG_MODEL` | `openai-gpt-oss-120b` | Modell mit Tool-Calling |
+| `OKG_MAX_ROUNDS` | `4` | Obergrenze der Werkzeugrunden |
+| `OKG_BUDGET_MS` | `16000` | Zeitbudget der Anreicherung |
+| `PORT` | `8787` | Port des BFF |
+
+## Werkzeuge
+
+| Werkzeug | Quelle | Rolle |
+|---|---|---|
+| `wikidata_search` | `wbsearchentities` | Begriff zu Q-IDs, mit Oberklassen zur Auswahl |
+| `wikidata_entity` | `wbgetentities` | Fakten einer Entität, Mengen mit Einheit, Zeitangaben |
+| `wikidata_sparql` | `query.wikidata.org` | Aggregationen, Zeitreihen, Zählungen |
+| `dbpedia_lookup` | `lookup.dbpedia.org` | Kurzbeschreibung und Typen |
+| `dbpedia_sparql` | `dbpedia.org/sparql` | Infobox-Zahlen, vor allem BIP pro Kopf |
+| `render_chart` | – | Diagramm aus belegten Zahlen |
+
+Alle Wissensgraph-Antworten sind als `<knowledge>`-Block markiert; der
+System-Prompt weist das Modell an, diesen Inhalt als Daten und nie als Anweisung
+zu behandeln.
+
+## Prüfen
+
+```bash
+npm test          # 66 Unit-Tests gegen aufgezeichnete Antworten, ohne Netz
+npm run typecheck
+npm run e2e       # fünf Abnahmefälle gegen die echten Endpunkte
+```
+
+`npm run e2e` braucht Netz und einen gültigen Key. Es prüft, dass jede Frage
+Werkzeuge benutzt, dass quantitative Antworten ein Diagramm bekommen und dass
+abgeschaltete Anreicherung wirklich keine Werkzeuge aufruft.
+
+Fixtures neu aufzeichnen, wenn sich die APIs ändern:
+
+```bash
+node scripts/record-fixtures.mjs
+```
+
+## Grenzen
+
+- Keine Zeitreihen aus dem Energiesektor. Wikidata hat keine Stromverbrauchs-
+  Property (gemessen: `Q29954` ist ein Item, keine Property), DBpedia keine
+  Zahlen dazu. Ein Tool für ENTSO-E oder den Open Energy Data Server ist der
+  vorgesehene nächste Anschluss; die Werkzeugschnittstelle ist darauf ausgelegt.
+- DBpedia liefert über SPARQL **kein** `dbo:abstract` (gemessen:
+  `ASK { ?s dbo:abstract ?a }` = `false`), Prosa nur über die Lookup-API.
+- DBpedia-Infobox-Zahlen sind Strings mit Einheiten, teils mehrfach
+  (`Monaco` dreimal) und enthalten Nicht-Staaten (`EFTA`). Normalisierung und
+  Plausibilität bleiben Aufgabe des Modells, das sie im Zweifel benennen muss.
+- Ohne HTTPS oder `localhost` kein PWA-Install.
+- Der Verlauf liegt in IndexedDB im Browser, nicht auf dem Server.
+
+Entscheidungen und Messwerte, die zu diesem Aufbau geführt haben:
+[docs/architektur.md](docs/architektur.md).

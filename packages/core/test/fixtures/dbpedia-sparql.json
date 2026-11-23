@@ -1,0 +1,13 @@
+
+{ "head": { "link": [], "vars": ["country", "gdp"] },
+  "results": { "distinct": false, "ordered": true, "bindings": [
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Monaco" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "315800.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Monaco" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "315800.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Monaco" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "315800.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Liechtenstein" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "207974.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Liechtenstein" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "207974.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Liechtenstein" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "207974.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Luxembourg" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "141079.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Luxembourg" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "141079.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Luxembourg" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "141079.0" }},
+    { "country": { "type": "uri", "value": "http://dbpedia.org/resource/Republic_of_Ireland" }	, "gdp": { "type": "literal", "datatype": "http://dbpedia.org/datatype/usDollar", "value": "108920.0" }} ] } }
