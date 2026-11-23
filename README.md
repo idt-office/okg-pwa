@@ -5,6 +5,12 @@ angereichert wird. Das Modell bekommt Werkzeuge, sucht Entitäten, schreibt
 SPARQL, zählt und zeichnet Grafiken. Jede Zahl in der Antwort stammt aus einem
 Werkzeugergebnis desselben Turns.
 
+![OKG Chat: Frage zum Kernkraftausbau, Antwort mit Zeitreihendiagramm aus
+Wikidata und Quellenzeile unter der Antwort](docs/screenshot-kernkraft-zeitreihe.png)
+
+*Zeitreihe aus `wikidata_timeline` (P729 Inbetriebnahme, P730 Stilllegung),
+Diagramm und Quellenzeile entstehen im selben Turn.*
+
 ```
 Browser (PWA)  --POST /api/chat-->  BFF  --ChatOpenAI-->  kiconnect.nrw
                                      |
