@@ -53,7 +53,7 @@ greift auf der Socket-Adresse; steht der BFF hinter einem Reverse Proxy, mit
 | `KICONNECT_API_KEY` | – | Pflicht, nur im Backend |
 | `OKG_MODEL` | `openai-gpt-oss-120b` | Modell mit Tool-Calling |
 | `OKG_MAX_ROUNDS` | `4` | Obergrenze der Werkzeugrunden |
-| `OKG_BUDGET_MS` | `16000` | Zeitbudget der Werkzeugrunden |
+| `OKG_BUDGET_MS` | `22000` | Zeitbudget der Werkzeugrunden |
 | `OKG_FINAL_ANSWER_MS` | `15000` | Zusatzfrist für die Schlussantwort, wenn das Budget im Werkzeuglauf verbraucht wurde |
 | `PORT` | `8787` | Port des BFF |
 | `TRUST_PROXY` | – | `1` vertraut `x-forwarded-for` (nur hinter eigenem Proxy) |
@@ -69,16 +69,16 @@ greift auf der Socket-Adresse; steht der BFF hinter einem Reverse Proxy, mit
 | `dbpedia_sparql` | `dbpedia.org/sparql` | Infobox-Zahlen, vor allem BIP pro Kopf |
 | `render_chart` | – | Diagramm aus belegten Zahlen |
 
-Alle Werkzeugantworten sind als `<knowledge>`-Block markiert, mit Quelle
-`wikidata`, `dbpedia`, `fehler` oder `system`. Der System-Prompt weist das Modell
-an, diesen Inhalt als Daten und nie als Anweisung zu behandeln. Fremdtext kann
-die Klammer nicht schließen: `</knowledge` und `<knowledge` werden im Rumpf
-maskiert, bevor der Block gebaut wird.
+Wissensgraph-Antworten stehen in `<knowledge source="wikidata|dbpedia">`,
+Werkzeugfehler in `<tool-error>`, Systemmeldungen ohne Tag. Der System-Prompt
+weist das Modell an, `<knowledge>` als Daten und nie als Anweisung zu behandeln.
+Fremdtext kann die Klammer nicht schließen: `<knowledge` und `</knowledge`
+werden im Rumpf maskiert, bevor der Block gebaut wird.
 
 ## Prüfen
 
 ```bash
-npm test          # 96 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
+npm test          # 110 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
 npm run typecheck
 npm run e2e       # fünf Abnahmefälle gegen die echten Endpunkte
 ```

@@ -139,6 +139,23 @@ export const toolDefs: ToolDefinition[] = [
   },
 ];
 
+/**
+ * Zwei Syntaxfehler treten bei Wikidata-Abfragen immer wieder auf. Der
+ * Fehlertext des Endpunkts nennt sie, sagt aber nicht, was zu tun ist.
+ */
+export function correctionHint(message: string): string | undefined {
+  if (/encountered .*"?service/i.test(message)) {
+    return "Hinweis: SERVICE wikibase:label muss innerhalb der geschweiften Klammern der WHERE-Klausel stehen, nicht dahinter.";
+  }
+  if (/bad aggregate/i.test(message)) {
+    return "Hinweis: Jede Variable, die nicht aggregiert wird, muss in GROUP BY stehen; alle anderen gehoeren in eine Aggregatfunktion.";
+  }
+  if (/zeitüberschreitung|timeout|timed out/i.test(message)) {
+    return "Hinweis: Die Abfrage war zu langsam. Nimm eine konkrete Klasse ohne tiefe P279*-Pfade, filtere frueher und setze ein kleineres LIMIT.";
+  }
+  return undefined;
+}
+
 export interface ToolRuntime {
   ledger: NumberLedger;
   sources: Source[];
@@ -160,6 +177,15 @@ export function knowledgeBlock(source: string, body: string): string {
   // Anweisung ausserhalb des Datenblocks.
   const safe = body.replace(/<(\/?)(knowledge)([^>]*)>/gi, "&lt;$1$2$3&gt;");
   return `<knowledge source="${source}">\n${safe}\n</knowledge>`;
+}
+
+/**
+ * Fehlermeldungen sind keine Wissensgraph-Daten. Sie bekommen ein eigenes Tag,
+ * damit `<knowledge>` weiterhin nur bedeutet: Inhalt ist Datum, keine Anweisung.
+ */
+export function toolError(body: string): string {
+  const safe = body.replace(/<(\/?)(tool-error)([^>]*)>/gi, "&lt;$1$2$3&gt;");
+  return `<tool-error>\n${safe}\n</tool-error>`;
 }
 
 /** Frist und Client-Abbruch kombiniert, damit kein Werkzeug weiterlaeuft. */
@@ -189,10 +215,12 @@ export async function executeTool(
       case "render_chart":
         return renderChart(args, runtime);
       default:
-        return { content: knowledgeBlock("system", `Unbekanntes Werkzeug: ${name}`), ok: false };
+        return { content: toolError(`Unbekanntes Werkzeug: ${name}`), ok: false };
     }
   } catch (error) {
-    return { content: knowledgeBlock("fehler", `Fehler: ${describeError(error)}`), ok: false };
+    const message = describeError(error);
+    const hint = correctionHint(message);
+    return { content: toolError(`Fehler: ${message}${hint ? `\n${hint}` : ""}`), ok: false };
   }
 }
 
@@ -201,7 +229,10 @@ function budgetLeft(runtime: ToolRuntime): number {
 }
 
 function toolTimeout(runtime: ToolRuntime, capMs: number): number {
-  return Math.max(1500, Math.min(capMs, budgetLeft(runtime)));
+  // Ein Restbudget bleibt immer stehen, damit nach einem langsamen Aufruf noch
+  // eine Runde fuer Diagramm und Antwort moeglich ist.
+  const reserve = 2500;
+  return Math.max(1500, Math.min(capMs, budgetLeft(runtime) - reserve));
 }
 
 function addSource(runtime: ToolRuntime, source: Source): void {
@@ -213,7 +244,7 @@ function addSource(runtime: ToolRuntime, source: Source): void {
 
 async function wikidataSearch(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
   const term = String(args.term ?? "").trim();
-  if (!term) return { content: "Fehler: term fehlt.", ok: false };
+  if (!term) return { content: toolError("Fehler: term fehlt."), ok: false };
   const language = args.language === "en" ? "en" : "de";
   const hits = await searchEntities(term, {
     language,
@@ -275,7 +306,7 @@ async function wikidataEntity(args: Record<string, unknown>, runtime: ToolRuntim
 async function wikidataSparql(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
   const query = String(args.query ?? "");
   const result = await runSparql(WIKIDATA_SPARQL, query, {
-    timeoutMs: toolTimeout(runtime, 30000),
+    timeoutMs: toolTimeout(runtime, 12000),
     signal: runtime.signal,
   });
   const table = toCompactTable(result);
@@ -356,7 +387,7 @@ function hash(text: string): string {
 
 async function dbpediaLookup(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
   const term = String(args.term ?? "").trim();
-  if (!term) return { content: "Fehler: term fehlt.", ok: false };
+  if (!term) return { content: toolError("Fehler: term fehlt."), ok: false };
   const maxResults = clamp(Number(args.maxResults ?? 5), 1, 8);
   const hits = await lookup(term, {
     maxResults,
@@ -386,7 +417,7 @@ async function dbpediaLookup(args: Record<string, unknown>, runtime: ToolRuntime
 async function dbpediaSparql(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
   const query = String(args.query ?? "");
   const result = await runSparql(DBPEDIA_SPARQL, query, {
-    timeoutMs: toolTimeout(runtime, 45000),
+    timeoutMs: toolTimeout(runtime, 15000),
     signal: runtime.signal,
   });
   const table = toCompactTable(result);
@@ -407,7 +438,7 @@ function renderChart(args: Record<string, unknown>, runtime: ToolRuntime): ToolR
   try {
     const spec = buildChart(args, runtime.ledger);
     if (runtime.charts.length > 0) {
-      return { content: knowledgeBlock("system", "Chart abgelehnt: pro Antwort ist nur ein Diagramm erlaubt."), ok: false };
+      return { content: toolError("Chart abgelehnt: pro Antwort ist nur ein Diagramm erlaubt."), ok: false };
     }
     runtime.charts.push(spec);
     const points = spec.series.reduce((sum, series) => sum + series.points.length, 0);
@@ -418,7 +449,7 @@ function renderChart(args: Record<string, unknown>, runtime: ToolRuntime): ToolR
     };
   } catch (error) {
     if (error instanceof ChartRejected) {
-      return { content: knowledgeBlock("system", `Chart abgelehnt: ${error.message}`), ok: false };
+      return { content: toolError(`Chart abgelehnt: ${error.message}`), ok: false };
     }
     throw error;
   }

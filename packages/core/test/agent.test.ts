@@ -147,3 +147,16 @@ describe("runAgent", () => {
     expect(events.some((event) => event.type === "done")).toBe(false);
   });
 });
+
+describe("runAgent: truncated", () => {
+  it("meldet truncated nicht, wenn nur die Modellantwort leer blieb", async () => {
+    state.rounds = [[], [text("Nachgeliefert.")]];
+    const events = await collect(
+      runAgent({ messages: [{ role: "user", content: "Hi" }], enrich: false }, cfg),
+    );
+    const done = events.find(
+      (event): event is Extract<AgentEvent, { type: "done" }> => event.type === "done",
+    );
+    expect(done?.truncated).toBe(false);
+  });
+});

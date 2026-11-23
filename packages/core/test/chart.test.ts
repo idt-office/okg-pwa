@@ -386,3 +386,41 @@ describe("autoChartFromTable: Zeitreihe mit Kategorienspalte", () => {
     expect(spec?.yField).toBe("bip");
   });
 });
+
+describe("autoChartFromTable: Rückfallebene ohne Labels", () => {
+  it("zeichnet auch mit Q-IDs, statt das Diagramm zu verlieren", () => {
+    const ledger = new NumberLedger();
+    ledger.addFrom([1400, 1060]);
+    const spec = autoChartFromTable(
+      {
+        vars: ["plant", "leistung"],
+        rows: [
+          { plant: "http://www.wikidata.org/entity/Q1", leistung: "1400" },
+          { plant: "http://www.wikidata.org/entity/Q2", leistung: "1060" },
+        ],
+        source: "wikidata_sparql",
+      },
+      ledger,
+    );
+    expect(spec).not.toBeNull();
+    expect(spec?.series[0]?.points.map((point) => point.x)).toEqual(["Q1", "Q2"]);
+  });
+});
+
+describe("autoChartFromTable: Gleichstand", () => {
+  it("bevorzugt bei gleich vielen Ausprägungen die Namensspalte", () => {
+    const rows = [
+      { land: "Monaco", jahr: "2022", bip: "315800" },
+      { land: "Luxemburg", jahr: "2020", bip: "141079" },
+      { land: "Irland", jahr: "2021", bip: "108920" },
+    ];
+    const ledger = new NumberLedger();
+    ledger.addFrom(rows);
+    const spec = autoChartFromTable(
+      { vars: ["land", "jahr", "bip"], rows, source: "dbpedia_sparql" },
+      ledger,
+    );
+    expect(spec?.xField).toBe("land");
+    expect(spec?.series[0]?.points.map((point) => point.x)).toContain("Monaco");
+  });
+});

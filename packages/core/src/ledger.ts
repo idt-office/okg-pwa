@@ -3,6 +3,8 @@
  * Chart-Validator prüft dagegen, damit das Modell keine Zahlen in ein Diagramm
  * schreiben kann, die nirgends belegt sind.
  */
+import { parseDbpediaNumber } from "./dbpedia.js";
+
 export class NumberLedger {
   private readonly values: number[] = [];
 
@@ -46,16 +48,14 @@ export class NumberLedger {
       .replace(/https?:\/\/\S+/g, " ")
       .replace(/\b[QP]\d+\b/g, " ")
       .replace(/\b\d{4}-\d{2}-\d{2}T[\d:+-]+Z?\b/g, " ");
-    // Tausendertrenner zuerst entfernen, sonst liest der Ledger "1 045,5" als
-    // zwei Zahlen und widerspricht dem Chart-Parser.
-    const normalized = cleaned.replace(
-      /\d{1,3}(?:[.\s\u00a0]\d{3})+(?:,\d+)?/g,
-      (match) => match.replace(/[.\s\u00a0]/g, ""),
-    );
+    // Tausendertrenner zuerst vereinheitlichen: "1 045,5" und "1,234.56" müssen
+    // dieselbe Zahl ergeben wie im Chart, sonst widersprechen sich beide.
+    const normalized = cleaned
+      .replace(/\d{1,3}(?:[.\s\u00a0]\d{3})+(?:,\d+)?/g, (match) => match.replace(/[.\s\u00a0]/g, ""))
+      .replace(/\d{1,3}(?:,\d{3})+\.\d+/g, (match) => match.replace(/,/g, ""));
     for (const match of normalized.matchAll(/-?\d+(?:[.,]\d+)?/g)) {
-      const raw = match[0].replace(",", ".");
-      const value = Number.parseFloat(raw);
-      if (Number.isFinite(value)) this.values.push(value);
+      const value = parseDbpediaNumber(match[0]);
+      if (value !== null) this.values.push(value);
     }
   }
 }

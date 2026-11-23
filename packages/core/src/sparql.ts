@@ -40,8 +40,16 @@ export function guardSparql(query: string): string {
   const bare = stripLiteralsAndComments(trimmed);
 
   // Ein umdefiniertes wikibase:-Präfix würde die SERVICE-Prüfung unten entwerten.
-  if (/(?:^|\s)PREFIX\s+wikibase\s*:/i.test(bare)) {
-    throw new QueryRejected("PREFIX wikibase: darf nicht umdefiniert werden.");
+  // Die übliche Deklaration auf die echte Ontologie bleibt erlaubt.
+  for (const match of trimmed.matchAll(/(?:^|\s)PREFIX\s+wikibase\s*:\s*<([^>]*)>/gi)) {
+    if ((match[1] ?? "").trim() !== "http://wikiba.se/ontology#") {
+      throw new QueryRejected(
+        "PREFIX wikibase: darf nur auf http://wikiba.se/ontology# zeigen.",
+      );
+    }
+  }
+  if (/(?:^|\s)PREFIX\s+wikibase\s*:(?!\s*<)/i.test(trimmed)) {
+    throw new QueryRejected("PREFIX wikibase: muss auf http://wikiba.se/ontology# zeigen.");
   }
 
   const withoutPrefixes = bare.replace(/(?:\b(?:PREFIX|BASE)\s+\S+\s*<[^>]*>\s*)+/gi, " ").trim();
@@ -62,26 +70,28 @@ export function guardSparql(query: string): string {
     }
   }
 
-  // Ein selbst geschriebenes LIMIT wird gedeckelt, nicht abgeschnitten.
-  const clamped = trimmed.replace(/\bLIMIT\s+(\d+)/gi, (_match, raw: string) => {
-    const value = Number.parseInt(raw, 10);
-    return `LIMIT ${Number.isFinite(value) ? Math.min(value, MAX_LIMIT) : DEFAULT_LIMIT}`;
-  });
+  // Nur das abschließende LIMIT ist das äußere. Ein LIMIT in einer Subquery
+  // darf den Deckel nicht ersetzen, und Literale werden nicht angefasst.
+  const trailingLimit = /\bLIMIT\s+(\d+)\s*$/i.exec(trimmed);
+  if (trailingLimit) {
+    const value = Number.parseInt(trailingLimit[1] ?? "", 10);
+    const capped = Number.isFinite(value) ? Math.min(value, MAX_LIMIT) : DEFAULT_LIMIT;
+    return `${trimmed.slice(0, trailingLimit.index)}LIMIT ${capped}`;
+  }
 
-  const bareClamped = stripLiteralsAndComments(clamped);
-  if (/\bLIMIT\s+\d+/i.test(bareClamped)) return clamped;
-  // SPARQL erlaubt OFFSET vor LIMIT, deshalb genügt Anhängen.
-  return `${clamped}\nLIMIT ${DEFAULT_LIMIT}`;
+  // SPARQL erlaubt OFFSET vor LIMIT, deshalb genügt Einsetzen beziehungsweise Anhängen.
+  const trailingOffset = /\bOFFSET\s+\d+\s*$/i.exec(trimmed);
+  if (trailingOffset) {
+    return `${trimmed.slice(0, trailingOffset.index)}LIMIT ${DEFAULT_LIMIT} ${trimmed.slice(trailingOffset.index)}`;
+  }
+  return `${trimmed}\nLIMIT ${DEFAULT_LIMIT}`;
 }
 
-/** Das Limit, mit dem die Abfrage hinausgeht. */
+/** Das äußere Limit, mit dem die Abfrage hinausgeht. */
 export function appliedLimit(query: string): number {
-  let limit = DEFAULT_LIMIT;
-  for (const match of stripLiteralsAndComments(query).matchAll(/\bLIMIT\s+(\d+)/gi)) {
-    const value = Number.parseInt(match[1] ?? "", 10);
-    if (Number.isFinite(value)) limit = value;
-  }
-  return limit;
+  const match = /\bLIMIT\s+(\d+)\s*$/i.exec(stripLiteralsAndComments(query));
+  const value = Number.parseInt(match?.[1] ?? "", 10);
+  return Number.isFinite(value) ? value : DEFAULT_LIMIT;
 }
 
 /**
@@ -132,9 +142,7 @@ export async function runSparql(
 
   const body = await readCapped(response, MAX_RESPONSE_BYTES);
   if (!response.ok) {
-    throw new Error(
-      `SPARQL-Fehler ${response.status}: ${body.slice(0, 300).replace(/\s+/g, " ")}`,
-    );
+    throw new Error(`SPARQL-Fehler ${response.status}: ${cleanEndpointError(body)}`);
   }
 
   let parsed: SparqlBindingResponse;
@@ -174,6 +182,18 @@ async function readCapped(response: Response, maxBytes: number): Promise<string>
     text += decoder.decode(value, { stream: true });
   }
   return text + decoder.decode();
+}
+
+/**
+ * WDQS stellt dem Rumpf `SPARQL-QUERY: queryStr=...` voran. Wer den Rumpf
+ * einfach abschneidet, verliert die eigentliche Ursache und das Modell rät.
+ */
+export function cleanEndpointError(body: string): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  const stripped = flat.replace(/^SPARQL-QUERY:.*?(?=(?:java\.|org\.|com\.|Caused by|Exception|Error|HttpException|Virtuoso|SR\d))/, "");
+  const marker = /(?:java\.|org\.|com\.|Caused by|Exception|Error|HttpException|Virtuoso|SR\d)/.exec(stripped);
+  const tail = marker ? stripped.slice(marker.index) : stripped;
+  return tail.slice(0, 300);
 }
 
 interface SparqlBindingResponse {

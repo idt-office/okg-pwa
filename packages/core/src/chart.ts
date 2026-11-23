@@ -232,7 +232,7 @@ export function autoChartFromTable(table: SparqlTable, ledger: NumberLedger): Ch
   // Land, bei einer Zeitreihe mit Kategorienspalte das Jahr.
   const xColumn =
     yearColumn && labelColumn
-      ? distinctCount(table, yearColumn.name) >= distinctCount(table, labelColumn.name)
+      ? distinctCount(table, yearColumn.name) > distinctCount(table, labelColumn.name)
         ? yearColumn
         : labelColumn
       : (labelColumn ?? yearColumn ?? others[0]);
@@ -284,8 +284,9 @@ function distinctCount(table: SparqlTable, name: string): number {
 function resolveLabel(raw: string, labels: Record<string, string> | undefined): string {
   const id = /(?:^|\/)([QP]\d+)$/.exec(raw.trim())?.[1];
   if (id) {
+    // Ohne nachgeschlagenes Label bleibt die ID stehen; ein leeres Diagramm wäre schlechter.
     const label = labels?.[id];
-    return label ? shorten(label) : "";
+    return shorten(label ?? id);
   }
   const text = raw
     .replace(/^https?:\/\/\S+\/([^/]+)$/, "$1")

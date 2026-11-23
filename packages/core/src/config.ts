@@ -13,10 +13,11 @@ export const DEFAULTS = {
   baseURL: "https://chat.kiconnect.nrw/api/v1",
   model: "openai-gpt-oss-120b",
   // Gemessen: mit 8 s und 3 Runden blieb für das Diagramm keine Runde übrig.
-  // 5 Runden und 18 s waren zu langsam; das Diagramm entsteht notfalls
+  // Eine einzelne teure Wikidata-Abfrage kann 12 s brauchen; 22 s lassen eine
+  // Wiederholung und die Schlussantwort zu. Das Diagramm entsteht notfalls
   // automatisch aus der Abfragetabelle (autoChartFromTable).
   maxRounds: 4,
-  budgetMs: 16000,
+  budgetMs: 22000,
   finalAnswerMs: 15000,
 };
 

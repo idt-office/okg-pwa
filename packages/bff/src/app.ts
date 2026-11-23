@@ -4,7 +4,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { runAgent as defaultRunAgent } from "@okg/core";
 import type { AgentConfig, AgentEvent, ChatMessage, ChatRequest } from "@okg/core";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 
@@ -186,13 +186,13 @@ async function loadModelsFromGateway(cfg: AgentConfig): Promise<string[]> {
   return ids.length > 0 ? ids : [cfg.model];
 }
 
-function clientKey(c: { req: { header: (name: string) => string | undefined } }, trustProxy: boolean): string {
+function clientKey(c: Context, trustProxy: boolean): string {
   if (trustProxy) {
     return c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "proxy";
   }
   try {
     // Ohne vertrauenswürdigen Proxy zählt die Socket-Adresse, nicht der Header.
-    return getConnInfo(c as never).remote.address ?? "local";
+    return getConnInfo(c).remote.address ?? "local";
   } catch {
     return "local";
   }

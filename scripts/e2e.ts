@@ -66,6 +66,7 @@ for (const testCase of selected) {
   let tools = 0;
   const toolNames: string[] = [];
   let errors = 0;
+  let toolErrors = 0;
   let sources: Source[] = [];
   let done: Extract<AgentEvent, { type: "done" }> | undefined;
 
@@ -82,7 +83,8 @@ for (const testCase of selected) {
     toolNames.push(event.name);
   }
   if (event.type === "tool" && event.phase === "end" && event.error) {
-    console.log(`      Werkzeugfehler ${event.name}: ${event.summary}`);
+    toolErrors += 1;
+    console.log(`      Werkzeugfehler ${event.name}: ${String(event.detail ?? event.summary).replace(/\s+/g, " ").slice(0, 260)}`);
   }
     if (event.type === "chart") {
       charts += 1;
@@ -103,12 +105,16 @@ for (const testCase of selected) {
   const text = answer.trim();
   const problems: string[] = [];
   if (text.length < 40) problems.push("Antwort zu kurz");
+  if (text.includes("konnte nicht erzeugt werden")) problems.push("keine Antwort erzeugt");
   if (testCase.expect.tools && tools === 0) problems.push("kein Werkzeugaufruf");
   if (!testCase.expect.tools && tools > 0) problems.push("Werkzeug trotz abgeschalteter Anreicherung");
   if (testCase.expect.chart && charts === 0) problems.push("kein Diagramm");
   if (errors > 0) problems.push(`${errors} Fehlerereignis(se)`);
+  if (toolErrors > 0) problems.push(`${toolErrors} Werkzeugfehler`);
 
-  console.log(`    Werkzeuge: ${tools} (${toolNames.join(", ")}), Diagramme: ${charts}, Quellen: ${sources.length}, ${elapsed} ms`);
+  console.log(
+    `    Werkzeuge: ${tools} (${toolNames.join(", ")}), Fehler: ${toolErrors}, Diagramme: ${charts}, Quellen: ${sources.length}, ${elapsed} ms`,
+  );
   if (done) console.log(`    Runden: ${done.rounds}, abgeschnitten: ${done.truncated}`);
   console.log(`    Antwort: ${text.slice(0, 400).replace(/\s+/g, " ")}`);
 

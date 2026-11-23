@@ -250,12 +250,12 @@ async function send(text: string): Promise<void> {
           ? error.message
           : String(error);
   } finally {
-    const stale = generation !== state.generation;
+    // Nach "Neu" gehoert der Zustand der neuen Anfrage; hier nichts zuruecksetzen.
+    if (generation !== state.generation) return;
     state.busy = false;
     state.abort = undefined;
     sendButton.textContent = "Senden";
     document.body.classList.remove("busy");
-    if (stale) return;
     refresh(assistantTurn, assistantNode, false);
     await saveTurns(state.turns);
     scrollToEnd();

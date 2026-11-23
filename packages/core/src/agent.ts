@@ -178,8 +178,16 @@ async function* streamFinalAnswer(
     // (nur Reasoning-Deltas). Dann ist eine Wiederholung billiger als eine
     // leere Antwort.
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      const instruction =
+        attempt === 0
+          ? closing
+          : new SystemMessage(
+              "Antworte jetzt in einem bis zwei Saetzen mit der wichtigsten Zahl oder Aussage aus den Werkzeugergebnissen. Keine Einleitung, keine Aufzaehlung.",
+            );
       const collection = await collectStream(
-        await model.stream([...messages, closing], { signal: withTimeout(signal, cfg.finalAnswerMs) }),
+        await model.stream([...messages, instruction], {
+          signal: withTimeout(signal, cfg.finalAnswerMs),
+        }),
       );
       if (collection.deltas.length > 0) {
         for (const chunk of collection.deltas) {
@@ -278,13 +286,16 @@ function chunkText(chunk: AIMessageChunk): string {
 }
 
 function summarize(content: string): string {
-  const withoutWrapper = content
-    .replace(/^<knowledge[^>]*>\n?/, "")
-    .replace(/\n?<\/knowledge>$/, "")
+  const lines = content
+    .replace(/^<(knowledge|tool-error)[^>]*>\n?/, "")
+    .replace(/\n?<\/(knowledge|tool-error)>$/, "")
     .split("\n")
-    .filter((line) => line.trim().length > 0);
-  const first = withoutWrapper[0] ?? "";
-  return first.length <= 140 ? first : `${first.slice(0, 139)}...`;
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  // Bei Fehlern steht die Ursache in der zweiten Zeile hinter "Fehler: ...".
+  const first = lines[0] ?? "";
+  const text = /^Fehler:/.test(first) && lines[1] ? `${first} ${lines[1]}` : first;
+  return text.length <= 140 ? text : `${text.slice(0, 139)}...`;
 }
 
 /**
