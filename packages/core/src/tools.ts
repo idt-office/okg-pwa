@@ -145,8 +145,6 @@ export interface ToolRuntime {
   charts: ChartSpec[];
   deadline: number;
   signal?: AbortSignal;
-  /** Letzte Abfragetabelle, für das automatische Diagramm als Rückfallebene. */
-  lastTable?: SparqlTable;
   /** Alle Tabellen des Turns; die Rückfallebene nimmt die letzte zeichenbare. */
   tables?: SparqlTable[];
 }
@@ -158,7 +156,16 @@ export interface ToolResult {
 }
 
 export function knowledgeBlock(source: string, body: string): string {
-  return `<knowledge source="${source}">\n${body}\n</knowledge>`;
+  // Fremdtext darf die Klammer nicht schliessen: sonst stuende danach eine
+  // Anweisung ausserhalb des Datenblocks.
+  const safe = body.replace(/<(\/?)(knowledge)([^>]*)>/gi, "&lt;$1$2$3&gt;");
+  return `<knowledge source="${source}">\n${safe}\n</knowledge>`;
+}
+
+/** Frist und Client-Abbruch kombiniert, damit kein Werkzeug weiterlaeuft. */
+function toolSignal(runtime: ToolRuntime, capMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(toolTimeout(runtime, capMs));
+  return runtime.signal ? AbortSignal.any([runtime.signal, timeout]) : timeout;
 }
 
 export async function executeTool(
@@ -182,10 +189,10 @@ export async function executeTool(
       case "render_chart":
         return renderChart(args, runtime);
       default:
-        return { content: `Unbekanntes Werkzeug: ${name}`, ok: false };
+        return { content: knowledgeBlock("system", `Unbekanntes Werkzeug: ${name}`), ok: false };
     }
   } catch (error) {
-    return { content: `Fehler: ${describeError(error)}`, ok: false };
+    return { content: knowledgeBlock("fehler", `Fehler: ${describeError(error)}`), ok: false };
   }
 }
 
@@ -211,7 +218,7 @@ async function wikidataSearch(args: Record<string, unknown>, runtime: ToolRuntim
   const hits = await searchEntities(term, {
     language,
     limit: 8,
-    signal: AbortSignal.timeout(toolTimeout(runtime, 15000)),
+    signal: toolSignal(runtime, 15000),
   });
   if (hits.length === 0) {
     return { content: knowledgeBlock("wikidata", `keine Treffer für "${term}"`), ok: true };
@@ -249,7 +256,7 @@ async function wikidataSearch(args: Record<string, unknown>, runtime: ToolRuntim
 
 async function wikidataEntity(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
   const id = String(args.id ?? "").trim().toUpperCase();
-  const entity = await entityFacts(id, AbortSignal.timeout(toolTimeout(runtime, 20000)));
+  const entity = await entityFacts(id, toolSignal(runtime, 20000));
   addSource(runtime, {
     kg: "wikidata",
     kind: "entity",
@@ -272,11 +279,23 @@ async function wikidataSparql(args: Record<string, unknown>, runtime: ToolRuntim
     signal: runtime.signal,
   });
   const table = toCompactTable(result);
-  runtime.lastTable = { vars: result.vars, rows: result.rows, source: "wikidata_sparql" };
-  runtime.tables = [...(runtime.tables ?? []), runtime.lastTable];
-  const labels = await safeBackfillLabels(result.rows, runtime);
+  const labelMap = await safeBackfillLabels(result.rows, runtime);
+  runtime.tables = [
+    ...(runtime.tables ?? []),
+    {
+      vars: result.vars,
+      rows: result.rows,
+      source: "wikidata_sparql",
+      labels: labelMap ? Object.fromEntries(labelMap) : undefined,
+    },
+  ];
+  const labels = labelMap
+    ? [...labelMap.entries()].map(([id, label]) => `${label} (${id})`).join("\n")
+    : undefined;
   const body = labels ? `${table}\nLabels:\n${labels}` : table;
-  runtime.ledger.addFrom(body);
+  // Der Ledger bekommt das volle Ergebnis, der Prompt nur die gekuerzte Tabelle.
+  runtime.ledger.addFrom(result.rows);
+  runtime.ledger.addFrom(labels ?? "");
   addSource(runtime, {
     kg: "wikidata",
     kind: "query",
@@ -292,7 +311,7 @@ async function wikidataSparql(args: Record<string, unknown>, runtime: ToolRuntim
 async function safeBackfillLabels(
   rows: Record<string, string>[],
   runtime: ToolRuntime,
-): Promise<string | undefined> {
+): Promise<Map<string, string> | undefined> {
   try {
     return await backfillEntityLabels(rows, runtime);
   } catch {
@@ -309,7 +328,7 @@ async function safeBackfillLabels(
 async function backfillEntityLabels(
   rows: Record<string, string>[],
   runtime: ToolRuntime,
-): Promise<string | undefined> {
+): Promise<Map<string, string> | undefined> {
   const ids = new Set<string>();
   for (const row of rows) {
     for (const value of Object.values(row)) {
@@ -320,12 +339,11 @@ async function backfillEntityLabels(
   if (ids.size === 0) return undefined;
   const wanted = [...ids].filter((id) => id.startsWith("Q")).slice(0, 40);
   if (wanted.length === 0) return undefined;
-  const labels = await fetchLabels(wanted, runtime.signal);
-  if (labels.size === 0) return undefined;
-  return wanted
-    .filter((id) => labels.has(id))
-    .map((id) => `${labels.get(id)} (${id})`)
-    .join("\n");
+  // Ohne Restbudget keine Label-Runde: sonst ueberholt der Lauf seine Obergrenze.
+  const left = budgetLeft(runtime);
+  if (left < 800) return undefined;
+  const labels = await fetchLabels(wanted, toolSignal(runtime, left));
+  return labels.size === 0 ? undefined : labels;
 }
 
 function hash(text: string): string {
@@ -342,7 +360,7 @@ async function dbpediaLookup(args: Record<string, unknown>, runtime: ToolRuntime
   const maxResults = clamp(Number(args.maxResults ?? 5), 1, 8);
   const hits = await lookup(term, {
     maxResults,
-    signal: AbortSignal.timeout(toolTimeout(runtime, 15000)),
+    signal: toolSignal(runtime, 15000),
   });
   if (hits.length === 0) {
     return { content: knowledgeBlock("dbpedia", `keine Treffer für "${term}"`), ok: true };
@@ -372,13 +390,12 @@ async function dbpediaSparql(args: Record<string, unknown>, runtime: ToolRuntime
     signal: runtime.signal,
   });
   const table = toCompactTable(result);
-  runtime.lastTable = { vars: result.vars, rows: result.rows, source: "dbpedia_sparql" };
-  runtime.tables = [...(runtime.tables ?? []), runtime.lastTable];
-  runtime.ledger.addFrom(table);
+  runtime.tables = [...(runtime.tables ?? []), { vars: result.vars, rows: result.rows, source: "dbpedia_sparql" }];
+  runtime.ledger.addFrom(result.rows);
   addSource(runtime, {
     kg: "dbpedia",
     kind: "query",
-    id: `dbpedia-sparql:${runtime.sources.length + 1}`,
+    id: `dbpedia-sparql:${hash(query)}`,
     label: `Abfrage: ${truncate(query.replace(/\s+/g, " ").trim(), 70)}`,
     url: "https://dbpedia.org/sparql",
     query,
@@ -390,7 +407,7 @@ function renderChart(args: Record<string, unknown>, runtime: ToolRuntime): ToolR
   try {
     const spec = buildChart(args, runtime.ledger);
     if (runtime.charts.length > 0) {
-      return { content: "Chart abgelehnt: pro Antwort ist nur ein Diagramm erlaubt.", ok: false };
+      return { content: knowledgeBlock("system", "Chart abgelehnt: pro Antwort ist nur ein Diagramm erlaubt."), ok: false };
     }
     runtime.charts.push(spec);
     const points = spec.series.reduce((sum, series) => sum + series.points.length, 0);
@@ -401,7 +418,7 @@ function renderChart(args: Record<string, unknown>, runtime: ToolRuntime): ToolR
     };
   } catch (error) {
     if (error instanceof ChartRejected) {
-      return { content: `Chart abgelehnt: ${error.message}`, ok: false };
+      return { content: knowledgeBlock("system", `Chart abgelehnt: ${error.message}`), ok: false };
     }
     throw error;
   }

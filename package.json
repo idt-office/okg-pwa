@@ -13,7 +13,7 @@
     "dev:web": "npm --workspace @okg/web run dev",
     "build": "npm --workspace @okg/web run build",
     "start": "npm --workspace @okg/bff run start",
-    "test": "npm --workspace @okg/core run test",
+    "test": "npm --workspace @okg/core run test && npm --workspace @okg/bff run test",
     "typecheck": "tsc --noEmit -p packages/core && tsc --noEmit -p packages/bff && tsc --noEmit -p packages/web",
     "e2e": "tsx scripts/e2e.ts"
   },

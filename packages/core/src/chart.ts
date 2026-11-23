@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseDbpediaNumber } from "./dbpedia.js";
 import type { NumberLedger } from "./ledger.js";
 
 export const CHART_TYPES = ["bar", "line", "table"] as const;
@@ -84,7 +85,9 @@ export function toVegaLite(spec: ChartSpec) {
   const values = spec.series.flatMap((series) =>
     series.points.map((point) => ({ x: point.x, y: point.y, series: series.name })),
   );
-  const numericX = values.every((row) => typeof row.x === "number" || /^-?\d+(\.\d+)?$/.test(row.x));
+  const numericX = values.every(
+    (row) => typeof row.x === "number" || /^-?\d+(\.\d+)?$/.test(row.x),
+  );
   const xType = numericX ? "quantitative" : "nominal";
 
   if (spec.type === "table") {
@@ -104,7 +107,10 @@ export function toVegaLite(spec: ChartSpec) {
     $schema: "https://vega.github.io/schema/vega-lite/v6.json",
     title: spec.title,
     data: { values },
-    mark: spec.type === "bar" ? { type: "bar", tooltip: true } : { type: "line", point: true, tooltip: true },
+    mark:
+      spec.type === "bar"
+        ? { type: "bar", tooltip: true }
+        : { type: "line", point: true, tooltip: true },
     encoding: {
       x: {
         field: "x",
@@ -122,43 +128,120 @@ export interface SparqlTable {
   vars: string[];
   rows: Record<string, string>[];
   source: string;
+  /** Nachgeschlagene Labels für Q-IDs, damit die Achse Namen statt Kürzel zeigt. */
+  labels?: Record<string, string>;
+}
+
+const MEASURE_HINT =
+  /(anzahl|count|wert|value|leistung|kapazit|capacity|bip|gdp|population|einwohner|summe|total|menge|prozent|percent|share|anteil|umsatz|produktion|emission|hoehe|height|flaeche|area)/i;
+const LABEL_HINT = /(label|name|titel|title|land|country|stadt|city|anlage|plant|entity|item)/i;
+const INDEX_NAME = /^(nr|no|index|rang|rank|id|position|pos)$/i;
+// Eine blanke vierstellige Zahl ist nur dann ein Jahr, wenn die Spalte so heisst.
+// Sonst wuerde jede Leistung in MW (1400) zur Zeitachse.
+const YEAR_OR_DATE = /^\d{4}(?:-\d{2}(?:-\d{2})?)?(?:\.0+)?$/;
+const DATE_WITH_SEPARATOR = /^\d{4}-\d{2}(?:-\d{2})?/;
+const YEARISH_NAME = /(jahr|year|datum|date|zeit|time|periode|period|dekade|decade)/i;
+
+interface Column {
+  name: string;
+  numeric: number;
+  label: number;
+  iri: number;
+  yearish: boolean;
+  indexish: boolean;
+  /** Spannweite der Zahlenwerte, als Tie-Break für die Messwertspalte. */
+  spread: number;
+}
+
+function describeColumns(table: SparqlTable): Column[] {
+  const rows = table.rows;
+  return table.vars.map((name) => {
+    let numeric = 0;
+    let label = 0;
+    let iri = 0;
+    let everyValueYearish = true;
+    let everyValueDate = true;
+    for (const row of rows) {
+      const raw = (row[name] ?? "").trim();
+      if (!raw) continue;
+      // IRIs sind keine Zahlen, auch wenn am Ende eine Ziffer steht.
+      if (/^(https?:\/\/|Q\d+$|P\d+$)/.test(raw)) {
+        iri += 1;
+      } else {
+        if (parseDbpediaNumber(raw) !== null) numeric += 1;
+        if (raw.length >= 2 && raw.length <= 60) label += 1;
+      }
+      if (!YEAR_OR_DATE.test(raw)) everyValueYearish = false;
+      if (!DATE_WITH_SEPARATOR.test(raw)) everyValueDate = false;
+    }
+    const yearish =
+      rows.length > 1 &&
+      ((everyValueYearish && YEARISH_NAME.test(name)) || everyValueDate);
+    const total = Math.max(1, rows.length);
+    const values = rows.map((row) => (row[name] ?? "").trim());
+    const numbers = rows
+      .map((row) => parseDbpediaNumber(row[name] ?? ""))
+      .filter((value): value is number => value !== null);
+    const spread =
+      numbers.length > 0 ? Math.max(...numbers) - Math.min(...numbers) : 0;
+    const integers = values.map((value) => Number.parseInt(value, 10));
+    const indexish =
+      INDEX_NAME.test(name) ||
+      (integers.every((value, index) => Number.isFinite(value) && value === index + 1) &&
+        values.length > 2);
+    return {
+      name,
+      numeric: numeric / total,
+      label: label / total,
+      iri: iri / total,
+      yearish,
+      indexish,
+      spread,
+    };
+  });
 }
 
 /**
  * Sicherheitsnetz: Wenn das Modell kein Diagramm liefert, bauen wir eines aus
- * der letzten Abfragetabelle. Es zeigt exakt die Zahlen aus dem Werkzeug, nichts
- * Erfundenes, und ist als automatisch erzeugt gekennzeichnet.
+ * einer Abfragetabelle. Es zeigt exakt die Zahlen aus dem Werkzeug.
  */
 export function autoChartFromTable(table: SparqlTable, ledger: NumberLedger): ChartSpec | null {
-  const vars = table.vars.length > 0 ? table.vars : Object.keys(table.rows[0] ?? {});
-  if (vars.length < 2 || table.rows.length < 2) return null;
+  const columns = describeColumns(table);
+  if (columns.length < 2 || table.rows.length < 2) return null;
 
-  const scores = new Map<string, number>();
-  for (const name of vars) {
-    const numeric = table.rows.filter((row) => toNumber(row[name]) !== null).length;
-    scores.set(name, numeric / table.rows.length);
-  }
+  const measureCandidates = columns.filter(
+    (column) => column.numeric >= 0.8 && !column.yearish && !column.indexish,
+  );
+  const yColumn =
+    measureCandidates.find((column) => MEASURE_HINT.test(column.name)) ??
+    measureCandidates.sort((left, right) => right.spread - left.spread)[0];
+  if (!yColumn) return null;
 
-  const numericVars = vars.filter((name) => (scores.get(name) ?? 0) >= 0.8);
-  if (numericVars.length === 0) return null;
-  const isYear = (name: string): boolean =>
-    table.rows.every((row) => {
-      const value = (row[name] ?? "").trim();
-      return /^\d{4}$/.test(value) && Number(value) >= 1800 && Number(value) <= 2100;
+  const others = columns.filter((column) => column.name !== yColumn.name);
+  // Achse: echte Namen vor IRIs, Jahreszahlen als Linienachse.
+  const labelCandidates = others
+    .filter((column) => column.label > 0.5 && column.numeric < 0.5 && column.iri < 0.5)
+    .sort((left, right) => {
+      const hintLeft = LABEL_HINT.test(left.name) ? 1 : 0;
+      const hintRight = LABEL_HINT.test(right.name) ? 1 : 0;
+      return hintRight - hintLeft || right.label - left.label;
     });
-  // Jahreszahlen sind Achse, nicht Messwert.
-  const yVar = numericVars.find((name) => !isYear(name));
-  if (!yVar) return null;
-  const xVar =
-    vars.find((name) => name !== yVar && (scores.get(name) ?? 1) < 0.5) ??
-    vars.find((name) => name !== yVar && isYear(name)) ??
-    vars.find((name) => name !== yVar);
-  if (!xVar) return null;
+  const yearColumn = others.find((column) => column.yearish);
+  const labelColumn = labelCandidates[0];
+  // Achse ist die Spalte mit den meisten Ausprägungen: bei einer Rangliste das
+  // Land, bei einer Zeitreihe mit Kategorienspalte das Jahr.
+  const xColumn =
+    yearColumn && labelColumn
+      ? distinctCount(table, yearColumn.name) >= distinctCount(table, labelColumn.name)
+        ? yearColumn
+        : labelColumn
+      : (labelColumn ?? yearColumn ?? others[0]);
+  if (!xColumn) return null;
 
   const byX = new Map<string, number>();
   for (const row of table.rows) {
-    const label = cleanLabel(row[xVar] ?? "");
-    const value = toNumber(row[yVar]);
+    const label = resolveLabel(row[xColumn.name] ?? "", table.labels);
+    const value = parseDbpediaNumber(row[yColumn.name] ?? "");
     if (!label || value === null) continue;
     const previous = byX.get(label);
     byX.set(label, previous === undefined ? value : Math.max(previous, value));
@@ -166,23 +249,25 @@ export function autoChartFromTable(table: SparqlTable, ledger: NumberLedger): Ch
   if (byX.size < 2) return null;
 
   const points = [...byX.entries()].map(([x, y]) => ({ x, y }));
-  const years = points.every((point) => /^\d{4}$/.test(point.x) && Number(point.x) > 1800);
-  const type: ChartSpec["type"] = years && points.length >= 4 ? "line" : "bar";
+  const lineLike =
+    xColumn.yearish || points.every((point) => YEAR_OR_DATE.test(point.x) && Number(point.x) > 1800);
+  const type: ChartSpec["type"] = lineLike && points.length >= 4 ? "line" : "bar";
 
   const ordered =
     type === "line"
       ? points.sort((left, right) => Number(left.x) - Number(right.x))
       : points.sort((right, left) => left.y - right.y);
-  const limited = ordered.slice(0, 15);
+  // Eine Linie verliert durch Top-15 ihren Verlauf; dort nur gleichmäßig kürzen.
+  const limited = type === "line" ? ordered.slice(0, 60) : ordered.slice(0, 15);
 
   try {
     return buildChart(
       {
         type,
-        title: `${yVar} nach ${xVar}`.slice(0, 120),
-        xField: xVar,
-        yField: yVar,
-        series: [{ name: yVar, points: limited }],
+        title: `${yColumn.name} nach ${xColumn.name}`.slice(0, 120),
+        xField: xColumn.name,
+        yField: yColumn.name,
+        series: [{ name: yColumn.name, points: limited }],
         note: `Automatisch aus dem Ergebnis von ${table.source} erzeugt.`,
       },
       ledger,
@@ -192,32 +277,23 @@ export function autoChartFromTable(table: SparqlTable, ledger: NumberLedger): Ch
   }
 }
 
-function toNumber(raw: string | undefined): number | null {
-  if (raw === undefined || raw === "") return null;
-  const cleaned = raw.replace(/<[^>]*>/g, "").trim();
-  const match = /^([+-]?\d[\d.,\s]*)/.exec(cleaned);
-  if (!match?.[1]) return null;
-  let token = match[1].replace(/\s/g, "");
-  const lastComma = token.lastIndexOf(",");
-  const lastDot = token.lastIndexOf(".");
-  if (lastComma >= 0 && lastDot >= 0) {
-    const decimal = lastComma > lastDot ? "," : ".";
-    const thousands = decimal === "," ? "." : ",";
-    token = token.split(thousands).join("");
-    if (decimal === ",") token = token.replace(",", ".");
-  } else if (lastComma >= 0) {
-    token = token.replace(",", ".");
-  } else if (lastDot >= 0 && /^\d{1,3}(\.\d{3})+$/.test(token)) {
-    token = token.replace(/\./g, "");
-  }
-  const value = Number.parseFloat(token);
-  return Number.isFinite(value) ? value : null;
+function distinctCount(table: SparqlTable, name: string): number {
+  return new Set(table.rows.map((row) => (row[name] ?? "").trim())).size;
 }
 
-function cleanLabel(raw: string): string {
+function resolveLabel(raw: string, labels: Record<string, string> | undefined): string {
+  const id = /(?:^|\/)([QP]\d+)$/.exec(raw.trim())?.[1];
+  if (id) {
+    const label = labels?.[id];
+    return label ? shorten(label) : "";
+  }
   const text = raw
     .replace(/^https?:\/\/\S+\/([^/]+)$/, "$1")
     .replace(/_/g, " ")
     .trim();
+  return text ? shorten(text) : "";
+}
+
+function shorten(text: string): string {
   return text.length > 40 ? `${text.slice(0, 39)}...` : text;
 }

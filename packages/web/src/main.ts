@@ -38,6 +38,7 @@ const state = {
   turns: [] as Turn[],
   busy: false,
   abort: undefined as AbortController | undefined,
+  generation: 0,
   model: "",
   enrich: localStorage.getItem("okg.enrich") !== "false",
 };
@@ -106,6 +107,9 @@ enrichBox.addEventListener("change", () => {
 document.body.classList.toggle("no-enrich", !state.enrich);
 
 document.querySelector("#reset")!.addEventListener("click", async () => {
+  // Laufenden Stream mit beenden, sonst schreibt er in abgehängte Knoten.
+  state.abort?.abort();
+  state.generation += 1;
   state.turns = [];
   log.innerHTML = "";
   await clearTurns();
@@ -214,6 +218,7 @@ async function send(text: string): Promise<void> {
   log.append(userNode, assistantNode);
   scrollToEnd();
 
+  const generation = state.generation;
   const controller = new AbortController();
   state.abort = controller;
 
@@ -245,10 +250,12 @@ async function send(text: string): Promise<void> {
           ? error.message
           : String(error);
   } finally {
+    const stale = generation !== state.generation;
     state.busy = false;
     state.abort = undefined;
     sendButton.textContent = "Senden";
     document.body.classList.remove("busy");
+    if (stale) return;
     refresh(assistantTurn, assistantNode, false);
     await saveTurns(state.turns);
     scrollToEnd();
@@ -257,7 +264,7 @@ async function send(text: string): Promise<void> {
 
 function apiMessages(): { role: "user" | "assistant"; content: string }[] {
   return state.turns
-    .filter((turn) => turn.content.trim().length > 0)
+    .filter((turn) => turn.content.trim().length > 0 && !turn.error)
     .slice(-12)
     .map((turn) => ({ role: turn.role, content: turn.content }));
 }

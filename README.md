@@ -41,7 +41,9 @@ Browser-Regel, keine Einstellung.
 
 Der BFF ist kein öffentlicher OpenAI-Proxy: es gibt bewusst kein
 `/v1/chat/completions`. Der Key bleibt serverseitig, der Browser sieht ihn nie.
-Ein Rate-Limit von 15 Anfragen pro Minute und IP schützt den geteilten Gateway-Key.
+Ein Rate-Limit von 15 Anfragen pro Minute schützt den geteilten Gateway-Key. Es
+greift auf der Socket-Adresse; steht der BFF hinter einem Reverse Proxy, mit
+`TRUST_PROXY=1` auf `x-forwarded-for` umschalten.
 
 ## Konfiguration
 
@@ -51,8 +53,10 @@ Ein Rate-Limit von 15 Anfragen pro Minute und IP schützt den geteilten Gateway-
 | `KICONNECT_API_KEY` | – | Pflicht, nur im Backend |
 | `OKG_MODEL` | `openai-gpt-oss-120b` | Modell mit Tool-Calling |
 | `OKG_MAX_ROUNDS` | `4` | Obergrenze der Werkzeugrunden |
-| `OKG_BUDGET_MS` | `16000` | Zeitbudget der Anreicherung |
+| `OKG_BUDGET_MS` | `16000` | Zeitbudget der Werkzeugrunden |
+| `OKG_FINAL_ANSWER_MS` | `15000` | Zusatzfrist für die Schlussantwort, wenn das Budget im Werkzeuglauf verbraucht wurde |
 | `PORT` | `8787` | Port des BFF |
+| `TRUST_PROXY` | – | `1` vertraut `x-forwarded-for` (nur hinter eigenem Proxy) |
 
 ## Werkzeuge
 
@@ -65,14 +69,16 @@ Ein Rate-Limit von 15 Anfragen pro Minute und IP schützt den geteilten Gateway-
 | `dbpedia_sparql` | `dbpedia.org/sparql` | Infobox-Zahlen, vor allem BIP pro Kopf |
 | `render_chart` | – | Diagramm aus belegten Zahlen |
 
-Alle Wissensgraph-Antworten sind als `<knowledge>`-Block markiert; der
-System-Prompt weist das Modell an, diesen Inhalt als Daten und nie als Anweisung
-zu behandeln.
+Alle Werkzeugantworten sind als `<knowledge>`-Block markiert, mit Quelle
+`wikidata`, `dbpedia`, `fehler` oder `system`. Der System-Prompt weist das Modell
+an, diesen Inhalt als Daten und nie als Anweisung zu behandeln. Fremdtext kann
+die Klammer nicht schließen: `</knowledge` und `<knowledge` werden im Rumpf
+maskiert, bevor der Block gebaut wird.
 
 ## Prüfen
 
 ```bash
-npm test          # 71 Unit-Tests gegen aufgezeichnete Antworten und ein Modell-Attrappen, ohne Netz
+npm test          # 96 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
 npm run typecheck
 npm run e2e       # fünf Abnahmefälle gegen die echten Endpunkte
 ```

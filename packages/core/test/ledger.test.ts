@@ -38,3 +38,19 @@ describe("NumberLedger", () => {
     expect(ledger.has(Number.NaN)).toBe(false);
   });
 });
+
+describe("NumberLedger mit Tausendertrennern", () => {
+  it("liest dieselbe Zahl wie der Chart-Parser", () => {
+    const ledger = new NumberLedger();
+    ledger.addFrom("Markersbach 1 045,5 MW, Monaco 315 800 USD");
+    expect(ledger.has(1045.5)).toBe(true);
+    expect(ledger.has(315800)).toBe(true);
+  });
+
+  it("verwechselt getrennte Zahlen nicht mit Tausendertrennern", () => {
+    const ledger = new NumberLedger();
+    ledger.addFrom("1984 | 18");
+    expect(ledger.has(1984)).toBe(true);
+    expect(ledger.has(18)).toBe(true);
+  });
+});

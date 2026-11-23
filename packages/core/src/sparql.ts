@@ -7,6 +7,8 @@ export interface SparqlResult {
   vars: string[];
   rows: Record<string, string>[];
   truncated: boolean;
+  /** Das Limit, mit dem die Abfrage tatsächlich hinausging. */
+  limit: number;
 }
 
 export class QueryRejected extends Error {
@@ -16,9 +18,11 @@ export class QueryRejected extends Error {
   }
 }
 
-const UPDATE_KEYWORDS = /\b(INSERT|DELETE|CLEAR|DROP|LOAD|CREATE|ADD|MOVE|COPY|WITH)\b/i;
+const UPDATE_KEYWORDS = /(?<![?$:\w])(INSERT|DELETE|CLEAR|DROP|LOAD|CREATE|ADD|MOVE|COPY|WITH)\b/i;
 const DEFAULT_LIMIT = 200;
+const MAX_LIMIT = 1000;
 const MAX_QUERY_LENGTH = 4000;
+const MAX_RESPONSE_BYTES = 8_000_000;
 
 /**
  * Erlaubt nur lesende Abfragen. Der Agent darf SPARQL selbst schreiben, weil
@@ -34,6 +38,12 @@ export function guardSparql(query: string): string {
   }
 
   const bare = stripLiteralsAndComments(trimmed);
+
+  // Ein umdefiniertes wikibase:-Präfix würde die SERVICE-Prüfung unten entwerten.
+  if (/(?:^|\s)PREFIX\s+wikibase\s*:/i.test(bare)) {
+    throw new QueryRejected("PREFIX wikibase: darf nicht umdefiniert werden.");
+  }
+
   const withoutPrefixes = bare.replace(/(?:\b(?:PREFIX|BASE)\s+\S+\s*<[^>]*>\s*)+/gi, " ").trim();
 
   if (!/^(SELECT|ASK)\b/i.test(withoutPrefixes)) {
@@ -42,21 +52,36 @@ export function guardSparql(query: string): string {
   if (UPDATE_KEYWORDS.test(withoutPrefixes)) {
     throw new QueryRejected("Schreibende SPARQL-Befehle sind nicht erlaubt.");
   }
-  for (const match of withoutPrefixes.matchAll(/\bSERVICE\s+([^\s{]+)/gi)) {
+  // Ohne Pflicht-Leerzeichen, sonst geht SERVICE<iri> durch.
+  for (const match of withoutPrefixes.matchAll(/(?<![\w:])SERVICE\b\s*(?:SILENT\s*)?([^\s{]*)/gi)) {
     const service = match[1] ?? "";
     if (!/^wikibase:label$/i.test(service)) {
-      throw new QueryRejected(`Nur SERVICE wikibase:label ist erlaubt, nicht ${service}.`);
+      throw new QueryRejected(
+        `Nur SERVICE wikibase:label ist erlaubt, nicht "${service || "(leer)"}".`,
+      );
     }
   }
 
-  if (!/\bLIMIT\s+\d+/i.test(withoutPrefixes)) {
-    const offset = withoutPrefixes.search(/\bOFFSET\s+\d+/i);
-    if (offset >= 0) {
-      return `${trimmed.slice(0, offset)}LIMIT ${DEFAULT_LIMIT} ${trimmed.slice(offset)}`.trim();
-    }
-    return `${trimmed}\nLIMIT ${DEFAULT_LIMIT}`;
+  // Ein selbst geschriebenes LIMIT wird gedeckelt, nicht abgeschnitten.
+  const clamped = trimmed.replace(/\bLIMIT\s+(\d+)/gi, (_match, raw: string) => {
+    const value = Number.parseInt(raw, 10);
+    return `LIMIT ${Number.isFinite(value) ? Math.min(value, MAX_LIMIT) : DEFAULT_LIMIT}`;
+  });
+
+  const bareClamped = stripLiteralsAndComments(clamped);
+  if (/\bLIMIT\s+\d+/i.test(bareClamped)) return clamped;
+  // SPARQL erlaubt OFFSET vor LIMIT, deshalb genügt Anhängen.
+  return `${clamped}\nLIMIT ${DEFAULT_LIMIT}`;
+}
+
+/** Das Limit, mit dem die Abfrage hinausgeht. */
+export function appliedLimit(query: string): number {
+  let limit = DEFAULT_LIMIT;
+  for (const match of stripLiteralsAndComments(query).matchAll(/\bLIMIT\s+(\d+)/gi)) {
+    const value = Number.parseInt(match[1] ?? "", 10);
+    if (Number.isFinite(value)) limit = value;
   }
-  return trimmed;
+  return limit;
 }
 
 /**
@@ -79,6 +104,7 @@ export async function runSparql(
   options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<SparqlResult> {
   const guarded = guardSparql(query);
+  const limit = appliedLimit(guarded);
   const { timeoutMs = 30000, signal } = options;
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -99,7 +125,12 @@ export async function runSparql(
     throw new Error(`SPARQL-Anfrage fehlgeschlagen: ${describeError(error)}`);
   }
 
-  const body = await response.text();
+  const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    throw new Error(`SPARQL-Antwort ist zu groß (${declaredLength} Bytes).`);
+  }
+
+  const body = await readCapped(response, MAX_RESPONSE_BYTES);
   if (!response.ok) {
     throw new Error(
       `SPARQL-Fehler ${response.status}: ${body.slice(0, 300).replace(/\s+/g, " ")}`,
@@ -123,7 +154,26 @@ export async function runSparql(
     return row;
   });
 
-  return { vars, rows, truncated: rows.length >= DEFAULT_LIMIT };
+  return { vars, rows, truncated: rows.length >= limit, limit };
+}
+
+async function readCapped(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`SPARQL-Antwort ist größer als ${maxBytes} Bytes.`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
 }
 
 interface SparqlBindingResponse {

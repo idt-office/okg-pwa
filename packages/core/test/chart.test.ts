@@ -221,3 +221,168 @@ describe("autoChartFromTable", () => {
     ).toBeNull();
   });
 });
+
+describe("autoChartFromTable: Spaltenwahl", () => {
+  const ledgerOf = (...values: number[]): NumberLedger => {
+    const ledger = new NumberLedger();
+    ledger.addFrom(values);
+    return ledger;
+  };
+
+  it("nimmt die Label-Spalte statt der Q-ID-Achse", () => {
+    const spec = autoChartFromTable(
+      {
+        vars: ["item", "itemLabel", "anzahl"],
+        rows: [
+          { item: "http://www.wikidata.org/entity/Q42", itemLabel: "Douglas Adams", anzahl: "7" },
+          { item: "http://www.wikidata.org/entity/Q64", itemLabel: "Berlin", anzahl: "3" },
+        ],
+        source: "wikidata_sparql",
+      },
+      ledgerOf(7, 3),
+    );
+    expect(spec?.xField).toBe("itemLabel");
+    expect(spec?.series[0]?.points).toEqual([
+      { x: "Douglas Adams", y: 7 },
+      { x: "Berlin", y: 3 },
+    ]);
+  });
+
+  it("löst Q-IDs über die nachgeschlagenen Labels auf", () => {
+    const spec = autoChartFromTable(
+      {
+        vars: ["plant", "leistung"],
+        rows: [
+          { plant: "http://www.wikidata.org/entity/Q1", leistung: "1400" },
+          { plant: "http://www.wikidata.org/entity/Q2", leistung: "1060" },
+        ],
+        source: "wikidata_sparql",
+        labels: { Q1: "Atdorf", Q2: "Goldisthal" },
+      },
+      ledgerOf(1400, 1060),
+    );
+    expect(spec?.series[0]?.points.map((point) => point.x)).toEqual(["Atdorf", "Goldisthal"]);
+  });
+
+  it("behandelt Datumsspalten als Achse, nicht als Messwert", () => {
+    const spec = autoChartFromTable(
+      {
+        vars: ["start", "anzahl"],
+        rows: [
+          { start: "1990-01-01", anzahl: "5" },
+          { start: "1991-01-01", anzahl: "6" },
+          { start: "1992-01-01", anzahl: "7" },
+          { start: "1993-01-01", anzahl: "8" },
+        ],
+        source: "wikidata_sparql",
+      },
+      ledgerOf(5, 6, 7, 8),
+    );
+    expect(spec?.yField).toBe("anzahl");
+    expect(spec?.xField).toBe("start");
+    expect(spec?.type).toBe("line");
+  });
+
+  it("erkennt Dezimaljahre als Achse", () => {
+    const spec = autoChartFromTable(
+      {
+        vars: ["jahr", "anzahl"],
+        rows: [
+          { jahr: "1970.0", anzahl: "4" },
+          { jahr: "1984.0", anzahl: "18" },
+          { jahr: "1990.0", anzahl: "5" },
+          { jahr: "2011.0", anzahl: "1" },
+        ],
+        source: "wikidata_sparql",
+      },
+      ledgerOf(4, 18, 5, 1),
+    );
+    expect(spec?.yField).toBe("anzahl");
+    expect(spec?.type).toBe("line");
+  });
+
+  it("lässt sich von einer Rangspalte nicht die Messwertachse wegnehmen", () => {
+    const spec = autoChartFromTable(
+      {
+        vars: ["nr", "land", "bip", "rang"],
+        rows: [
+          { nr: "1", land: "Monaco", bip: "315800", rang: "1" },
+          { nr: "2", land: "Liechtenstein", bip: "207974", rang: "2" },
+        ],
+        source: "dbpedia_sparql",
+      },
+      ledgerOf(1, 315800, 207974, 2),
+    );
+    expect(spec?.yField).toBe("bip");
+    expect(spec?.xField).toBe("land");
+  });
+
+  it("verwirft Indexspalten über die ganze Tabelle", () => {
+    const rows = Array.from({ length: 5 }, (_, index) => ({
+      nr: String(index + 1),
+      land: `Land ${index + 1}`,
+      wert: String(100 - index * 10),
+    }));
+    const spec = autoChartFromTable(
+      { vars: ["nr", "land", "wert"], rows, source: "x" },
+      ledgerOf(...rows.map((row) => Number(row.wert))),
+    );
+    expect(spec?.yField).toBe("wert");
+  });
+
+  it("akzeptiert Tausendertrenner konsistent zum Ledger", () => {
+    const ledger = ledgerOf();
+    ledger.addFrom("Markersbach 1 045,5 MW, Goldisthal 1 060 MW");
+    const spec = autoChartFromTable(
+      {
+        vars: ["anlage", "leistung"],
+        rows: [
+          { anlage: "Markersbach", leistung: "1 045,5" },
+          { anlage: "Goldisthal", leistung: "1 060" },
+        ],
+        source: "wikidata_sparql",
+      },
+      ledger,
+    );
+    expect(spec?.series[0]?.points).toEqual([
+      { x: "Goldisthal", y: 1060 },
+      { x: "Markersbach", y: 1045.5 },
+    ]);
+  });
+});
+
+describe("autoChartFromTable: Zeitreihe mit Kategorienspalte", () => {
+  it("nimmt das Jahr als Achse, wenn die Kategorienspalte weniger Ausprägungen hat", () => {
+    const rows = [];
+    for (let year = 1960; year < 1980; year += 1) {
+      rows.push({ jahr: String(year), type: "Druckwasser", anzahl: String(year - 1950) });
+      rows.push({ jahr: String(year), type: "Siedewasser", anzahl: String(year - 1958) });
+    }
+    const ledger = new NumberLedger();
+    ledger.addFrom(rows);
+    const spec = autoChartFromTable(
+      { vars: ["jahr", "type", "anzahl"], rows, source: "wikidata_sparql" },
+      ledger,
+    );
+    expect(spec?.xField).toBe("jahr");
+    expect(spec?.type).toBe("line");
+    // Ein Verlauf darf nicht auf die ersten 15 Jahre gekürzt werden.
+    expect(spec?.series[0]?.points).toHaveLength(20);
+  });
+
+  it("nimmt das Land als Achse, wenn es je Zeile einmal vorkommt", () => {
+    const rows = [
+      { land: "Monaco", jahr: "2022", bip: "315800" },
+      { land: "Liechtenstein", jahr: "2022", bip: "207974" },
+      { land: "Luxemburg", jahr: "2022", bip: "141079" },
+    ];
+    const ledger = new NumberLedger();
+    ledger.addFrom(rows);
+    const spec = autoChartFromTable(
+      { vars: ["land", "jahr", "bip"], rows, source: "dbpedia_sparql" },
+      ledger,
+    );
+    expect(spec?.xField).toBe("land");
+    expect(spec?.yField).toBe("bip");
+  });
+});

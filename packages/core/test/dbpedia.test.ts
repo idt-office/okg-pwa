@@ -47,3 +47,10 @@ describe("dbpediaUrlFromSitelink", () => {
     );
   });
 });
+
+describe("parseDbpediaNumber mit Bezeichnern", () => {
+  it("hält IRIs und Q-IDs für keine Zahlen", () => {
+    expect(parseDbpediaNumber("http://www.wikidata.org/entity/Q64")).toBeNull();
+    expect(parseDbpediaNumber("Q42")).toBeNull();
+  });
+});

@@ -70,6 +70,8 @@ export function dbpediaUrlFromSitelink(title: string): string {
  */
 export function parseDbpediaNumber(raw: string): number | null {
   const cleaned = raw.replace(/<[^>]*>/g, "").replace(/\u00a0/g, " ").trim();
+  // Eine IRI oder Q-ID ist keine Zahl, auch wenn sie auf eine Ziffer endet.
+  if (/^(https?:\/\/|Q\d+$|P\d+$)/.test(cleaned)) return null;
   const match = /^[^\d+-]*([+-]?\d[\d.,\s]*)/.exec(cleaned);
   if (!match?.[1]) return null;
 

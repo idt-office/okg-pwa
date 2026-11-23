@@ -81,7 +81,16 @@ for (const testCase of selected) {
     tools += 1;
     toolNames.push(event.name);
   }
-    if (event.type === "chart") charts += 1;
+  if (event.type === "tool" && event.phase === "end" && event.error) {
+    console.log(`      Werkzeugfehler ${event.name}: ${event.summary}`);
+  }
+    if (event.type === "chart") {
+      charts += 1;
+      const points = event.spec.series.reduce((sum, series) => sum + series.points.length, 0);
+      console.log(
+        `      Diagramm: ${event.spec.type}, ${event.spec.xField} -> ${event.spec.yField}, ${points} Punkte${event.spec.note ? ` (${event.spec.note})` : ""}`,
+      );
+    }
     if (event.type === "sources") sources = event.sources;
     if (event.type === "error") {
       errors += 1;

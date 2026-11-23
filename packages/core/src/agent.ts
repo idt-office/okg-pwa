@@ -85,7 +85,7 @@ export async function* runAgent(
       }
       const answer = chunks.message;
       if (!answer) {
-        truncated = true;
+        // Leere Runde ist kein Budgetende; die Schlussantwort unten faengt sie auf.
         break;
       }
 
@@ -229,7 +229,7 @@ async function collectStream(
   const deltas: string[] = [];
   let accumulated: AIMessageChunk | undefined;
   for await (const chunk of stream) {
-    const text = typeof chunk.content === "string" ? chunk.content : "";
+    const text = chunkText(chunk);
     if (text) deltas.push(text);
     accumulated = accumulated ? accumulated.concat(chunk) : chunk;
   }
@@ -259,6 +259,22 @@ function toLangChainMessage(message: ChatMessage): BaseMessage {
     default:
       return new HumanMessage(message.content);
   }
+}
+
+/** Inhalt kann ein String oder ein Block-Array sein; beides wird zu Text. */
+function chunkText(chunk: AIMessageChunk): string {
+  const content = chunk.content as unknown;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        const text = (part as { text?: unknown } | null)?.text;
+        return typeof text === "string" ? text : "";
+      })
+      .join("");
+  }
+  return "";
 }
 
 function summarize(content: string): string {

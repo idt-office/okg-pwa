@@ -46,7 +46,13 @@ export class NumberLedger {
       .replace(/https?:\/\/\S+/g, " ")
       .replace(/\b[QP]\d+\b/g, " ")
       .replace(/\b\d{4}-\d{2}-\d{2}T[\d:+-]+Z?\b/g, " ");
-    for (const match of cleaned.matchAll(/-?\d+(?:[.,]\d+)?/g)) {
+    // Tausendertrenner zuerst entfernen, sonst liest der Ledger "1 045,5" als
+    // zwei Zahlen und widerspricht dem Chart-Parser.
+    const normalized = cleaned.replace(
+      /\d{1,3}(?:[.\s\u00a0]\d{3})+(?:,\d+)?/g,
+      (match) => match.replace(/[.\s\u00a0]/g, ""),
+    );
+    for (const match of normalized.matchAll(/-?\d+(?:[.,]\d+)?/g)) {
       const raw = match[0].replace(",", ".");
       const value = Number.parseFloat(raw);
       if (Number.isFinite(value)) this.values.push(value);

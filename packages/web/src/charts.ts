@@ -17,29 +17,40 @@ export async function renderChartInto(container: HTMLElement, spec: ChartSpec): 
 
   try {
     const { default: embed } = await import("vega-embed");
-    await embed(canvas, toVegaLite(spec) as never, {
-      actions: false,
-      renderer: "svg",
-    });
+    const liteSpec = toVegaLite(spec) as Parameters<typeof embed>[1];
+    await embed(canvas, liteSpec, { actions: false, renderer: "svg" });
   } catch (error) {
-    figure.innerHTML = "";
-    const fallback = document.createElement("table");
-    fallback.className = "chart-fallback";
-    const head = document.createElement("tr");
-    head.innerHTML = `<th>${spec.xField}</th><th>${spec.yField}</th>`;
-    fallback.append(head);
-    for (const point of spec.series[0]?.points ?? []) {
-      const row = document.createElement("tr");
-      const x = document.createElement("td");
-      x.textContent = String(point.x);
-      const y = document.createElement("td");
-      y.textContent = String(point.y);
-      row.append(x, y);
-      fallback.append(row);
-    }
-    figure.append(fallback);
+    figure.replaceChildren();
+    figure.append(fallbackTable(spec));
     const note = document.createElement("figcaption");
-    note.textContent = `Diagramm nicht renderbar (${error instanceof Error ? error.message : "Fehler"}), Daten als Tabelle.`;
+    note.textContent = `Diagramm nicht renderbar (${
+      error instanceof Error ? error.message : "Fehler"
+    }), Daten als Tabelle.`;
     figure.append(note);
   }
+}
+
+/** Tabellenrückfall ohne innerHTML: Spaltentitel kommen vom Modell. */
+function fallbackTable(spec: ChartSpec): HTMLTableElement {
+  const table = document.createElement("table");
+  table.className = "chart-fallback";
+
+  const head = document.createElement("tr");
+  for (const title of [spec.xField, spec.yField]) {
+    const cell = document.createElement("th");
+    cell.textContent = title;
+    head.append(cell);
+  }
+  table.append(head);
+
+  for (const point of spec.series[0]?.points ?? []) {
+    const row = document.createElement("tr");
+    for (const value of [String(point.x), String(point.y)]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    table.append(row);
+  }
+  return table;
 }

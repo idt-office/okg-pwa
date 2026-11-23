@@ -7,11 +7,10 @@ export const USER_AGENT = "okg-pwa/0.1 (IDT FH Aachen; okg-pwa@fh-aachen.de)";
 export interface FetchOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
-  headers?: Record<string, string>;
 }
 
 export async function fetchJson<T>(url: string, options: FetchOptions = {}): Promise<T> {
-  const { timeoutMs = 20000, signal, headers } = options;
+  const { timeoutMs = 20000, signal } = options;
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
@@ -22,7 +21,6 @@ export async function fetchJson<T>(url: string, options: FetchOptions = {}): Pro
       headers: {
         "user-agent": USER_AGENT,
         accept: "application/json",
-        ...headers,
       },
     });
   } catch (error) {
