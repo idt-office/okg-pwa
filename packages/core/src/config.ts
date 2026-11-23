@@ -13,11 +13,12 @@ export const DEFAULTS = {
   baseURL: "https://chat.kiconnect.nrw/api/v1",
   model: "openai-gpt-oss-120b",
   // Gemessen: mit 8 s und 3 Runden blieb für das Diagramm keine Runde übrig.
-  // Eine einzelne teure Wikidata-Abfrage kann 12 s brauchen; 22 s lassen eine
-  // Wiederholung und die Schlussantwort zu. Das Diagramm entsteht notfalls
-  // automatisch aus der Abfragetabelle (autoChartFromTable).
+  // Gemessen: eine DBpedia-Rangliste braucht kalt bis 16 s, warm unter 2 s; eine
+  // teure Wikidata-Abfrage bis 12 s. 26 s lassen eine Wiederholung und die
+  // Schlussantwort zu. Das Diagramm entsteht notfalls automatisch aus der
+  // Abfragetabelle (autoChartFromTable).
   maxRounds: 4,
-  budgetMs: 22000,
+  budgetMs: 26000,
   finalAnswerMs: 15000,
 };
 

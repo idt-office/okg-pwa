@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   appliedLimit,
   cleanEndpointError,
+  stripTrailingComments,
   guardSparql,
   QueryRejected,
   runSparql,
@@ -125,6 +126,34 @@ describe("guardSparql", () => {
     expect(guarded.endsWith("LIMIT 200")).toBe(true);
     expect(guarded).toContain("LIMIT 5 }");
     expect(appliedLimit(guarded)).toBe(200);
+  });
+
+  it("behält einen Kommentar hinter dem LIMIT", () => {
+    const query = "SELECT ?x WHERE { ?x ?p ?o } LIMIT 20 # nur die ersten 20";
+    expect(guardSparql(query)).toBe(query);
+  });
+
+  it("ergänzt ein LIMIT auch hinter einem Kommentar", () => {
+    const guarded = guardSparql("SELECT ?x WHERE { ?x ?p ?o } # LIMIT 5000");
+    expect(guarded).toMatch(/\nLIMIT 200$/);
+    expect(appliedLimit(guarded)).toBe(200);
+  });
+
+  it("setzt LIMIT vor einen OFFSET mit Kommentar", () => {
+    const guarded = guardSparql("SELECT ?x WHERE { ?x ?p ?o } OFFSET 10 # zehn überspringen");
+    expect(guarded).toContain("LIMIT 200 OFFSET 10");
+    expect(guarded).toContain("# zehn überspringen");
+  });
+
+  it("weist eine zweite wikibase-Deklaration ohne Leerzeichen ab", () => {
+    const query =
+      "PREFIX wd: <http://www.wikidata.org/entity/>PREFIX wikibase: <http://evil.example/#>\nSELECT ?x WHERE { ?x wd:P31 wd:Q5 }";
+    expect(() => guardSparql(query)).toThrow(/wikibase/);
+  });
+
+  it("lässt sich von einem Kommentar mit PREFIX nicht täuschen", () => {
+    const query = "# PREFIX wikibase: <http://evil.example/#>\nSELECT ?x WHERE { ?x ?p ?o }";
+    expect(() => guardSparql(query)).not.toThrow();
   });
 
   it("begrenzt die Abfragelänge", () => {

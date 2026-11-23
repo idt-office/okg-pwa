@@ -53,7 +53,7 @@ greift auf der Socket-Adresse; steht der BFF hinter einem Reverse Proxy, mit
 | `KICONNECT_API_KEY` | – | Pflicht, nur im Backend |
 | `OKG_MODEL` | `openai-gpt-oss-120b` | Modell mit Tool-Calling |
 | `OKG_MAX_ROUNDS` | `4` | Obergrenze der Werkzeugrunden |
-| `OKG_BUDGET_MS` | `22000` | Zeitbudget der Werkzeugrunden |
+| `OKG_BUDGET_MS` | `26000` | Zeitbudget der Werkzeugrunden |
 | `OKG_FINAL_ANSWER_MS` | `15000` | Zusatzfrist für die Schlussantwort, wenn das Budget im Werkzeuglauf verbraucht wurde |
 | `PORT` | `8787` | Port des BFF |
 | `TRUST_PROXY` | – | `1` vertraut `x-forwarded-for` (nur hinter eigenem Proxy) |
@@ -64,7 +64,10 @@ greift auf der Socket-Adresse; steht der BFF hinter einem Reverse Proxy, mit
 |---|---|---|
 | `wikidata_search` | `wbsearchentities` | Begriff zu Q-IDs, mit Oberklassen zur Auswahl |
 | `wikidata_entity` | `wbgetentities` | Fakten einer Entität, Mengen mit Einheit, Zeitangaben |
-| `wikidata_sparql` | `query.wikidata.org` | Aggregationen, Zeitreihen, Zählungen |
+| `wikidata_ranking` | `query.wikidata.org` | Rangliste einer Klasse nach Zahlenwert, numerisch sortiert |
+| `wikidata_timeline` | `query.wikidata.org` | Ereignisse je Jahr (z. B. Inbetriebnahme, Stilllegung) |
+| `dbpedia_ranking` | `dbpedia.org/sparql` | Infobox-Ranglisten, numerisch sortiert und dedupliziert |
+| `wikidata_sparql` | `query.wikidata.org` | Freie lesende Abfrage, Notausgang für alles andere |
 | `dbpedia_lookup` | `lookup.dbpedia.org` | Kurzbeschreibung und Typen |
 | `dbpedia_sparql` | `dbpedia.org/sparql` | Infobox-Zahlen, vor allem BIP pro Kopf |
 | `render_chart` | – | Diagramm aus belegten Zahlen |
@@ -78,7 +81,7 @@ werden im Rumpf maskiert, bevor der Block gebaut wird.
 ## Prüfen
 
 ```bash
-npm test          # 110 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
+npm test          # 124 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
 npm run typecheck
 npm run e2e       # fünf Abnahmefälle gegen die echten Endpunkte
 ```
@@ -105,6 +108,9 @@ node scripts/record-fixtures.mjs
   (`Monaco` dreimal) und enthalten Nicht-Staaten (`EFTA`). Normalisierung und
   Plausibilität bleiben Aufgabe des Modells, das sie im Zweifel benennen muss.
 - Ohne HTTPS oder `localhost` kein PWA-Install.
+- query.wikidata.org drosselt bei vielen Anfragen pro Minute (HTTP 429). Der
+  Client weist darauf hin, statt blind zu wiederholen; identische Abfragen
+  werden fünf Minuten zwischengespeichert.
 - Der Verlauf liegt in IndexedDB im Browser, nicht auf dem Server.
 
 Entscheidungen und Messwerte, die zu diesem Aufbau geführt haben:

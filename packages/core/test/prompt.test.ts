@@ -5,7 +5,17 @@ describe("systemPrompt", () => {
   const enriched = systemPrompt({ enrich: true, maxRounds: 3, budgetMs: 8000 });
 
   it("nennt die Werkzeuge beim Namen", () => {
-    for (const tool of ["wikidata_search", "wikidata_entity", "wikidata_sparql", "dbpedia_lookup", "dbpedia_sparql", "render_chart"]) {
+    for (const tool of [
+      "wikidata_search",
+      "wikidata_entity",
+      "wikidata_ranking",
+      "wikidata_timeline",
+      "wikidata_sparql",
+      "dbpedia_lookup",
+      "dbpedia_ranking",
+      "dbpedia_sparql",
+      "render_chart",
+    ]) {
       expect(enriched).toContain(tool);
     }
   });

@@ -110,6 +110,11 @@ document.querySelector("#reset")!.addEventListener("click", async () => {
   // Laufenden Stream mit beenden, sonst schreibt er in abgehängte Knoten.
   state.abort?.abort();
   state.generation += 1;
+  // Der Reset besitzt den Zustand: der abgebrochene Lauf raeumt nichts mehr auf.
+  state.busy = false;
+  state.abort = undefined;
+  sendButton.textContent = "Senden";
+  document.body.classList.remove("busy");
   state.turns = [];
   log.innerHTML = "";
   await clearTurns();

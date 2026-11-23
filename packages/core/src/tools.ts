@@ -51,6 +51,62 @@ export const toolDefs: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "wikidata_ranking",
+      description:
+        "Rangliste einer Klasse nach einem Zahlenwert, numerisch sortiert. Deterministisch gebaut, keine eigene SPARQL-Abfrage noetig. Beispiel: class Q339353 (Pumpspeicherkraftwerk), property P2109 (Nennleistung), country Q183.",
+      parameters: {
+        type: "object",
+        properties: {
+          class: { type: "string", description: "Klasse als Q-ID, z. B. Q339353" },
+          property: { type: "string", description: "Zahlenwert-Property als P-ID, z. B. P2109" },
+          country: { type: "string", description: "Optionaler Staat als Q-ID, z. B. Q183" },
+          limit: { type: "number", description: "1 bis 50, Standard 10" },
+        },
+        required: ["class", "property"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "wikidata_timeline",
+      description:
+        "Zeitreihe: zaehlt je Jahr, wie viele Elemente einer Klasse ein Datum tragen. Beispiel: class Q134447 (Kernkraftwerk) mit P729 (Inbetriebnahme) oder P730 (Stilllegung).",
+      parameters: {
+        type: "object",
+        properties: {
+          class: { type: "string", description: "Klasse als Q-ID" },
+          property: { type: "string", description: "Datums-Property als P-ID, z. B. P729" },
+        },
+        required: ["class", "property"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "dbpedia_ranking",
+      description:
+        "Rangliste aus DBpedia-Infoboxen, numerisch sortiert und dedupliziert. Werte sind Strings mit Einheiten; dieser Aufruf wandelt sie um, woran eine eigene Abfrage regelmaessig scheitert. Beispiel: property dbp:gdpNominalPerCapita.",
+      parameters: {
+        type: "object",
+        properties: {
+          property: {
+            type: "string",
+            description: "Infobox-Property, z. B. dbp:gdpNominalPerCapita oder dbp:gdpPppPerCapita",
+          },
+          limit: { type: "number", description: "1 bis 50, Standard 10" },
+        },
+        required: ["property"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "wikidata_sparql",
       description:
         "Eigene lesende SPARQL-Abfrage gegen query.wikidata.org für Zählungen, Ranglisten und Zeitreihen. Nur SELECT/ASK, SERVICE nur wikibase:label. P729 = Inbetriebnahme, P730 = Stilllegung, P2109 = Nennleistung, P17 = Staat.",
@@ -139,16 +195,101 @@ export const toolDefs: ToolDefinition[] = [
   },
 ];
 
+/** Baut die Ranglisten-Abfrage. IDs werden geprueft, damit nichts eingeschleust wird. */
+export function rankingQuery(
+  classId: string,
+  propertyId: string,
+  countryId: string | undefined,
+  limit: number,
+): string {
+  const classQ = requireId(classId, /^Q\d+$/, "class");
+  const propertyP = requireId(propertyId, /^P\d+$/, "property");
+  const country = countryId ? ` ; wdt:P17 wd:${requireId(countryId, /^Q\d+$/, "country")}` : "";
+  return [
+    `SELECT ?item ?itemLabel ?value WHERE {`,
+    `  ?item wdt:P31 wd:${classQ}${country} ; wdt:${propertyP} ?value .`,
+    `  SERVICE wikibase:label { bd:serviceParam wikibase:language "de,en". }`,
+    `} ORDER BY DESC(?value) LIMIT ${clamp(limit, 1, 50)}`,
+  ].join("\n");
+}
+
+/** Baut die Zeitreihen-Abfrage: Ereignisse je Jahr. */
+export function timelineQuery(classId: string, propertyId: string): string {
+  const classQ = requireId(classId, /^Q\d+$/, "class");
+  const propertyP = requireId(propertyId, /^P\d+$/, "property");
+  return [
+    "SELECT ?jahr (COUNT(?item) AS ?anzahl) WHERE {",
+    `  ?item wdt:P31 wd:${classQ} ; wdt:${propertyP} ?datum .`,
+    "  BIND(YEAR(?datum) AS ?jahr)",
+    "} GROUP BY ?jahr ORDER BY ?jahr LIMIT 200",
+  ].join("\n");
+}
+
+/** Baut die DBpedia-Rangliste mit numerischer Sortierung und Dedupe. */
+export function dbpediaRankingQuery(property: string, limit: number): string {
+  if (!/^dbp:[A-Za-z0-9_]+$/.test(property)) {
+    throw new Error("property muss die Form dbp:name haben.");
+  }
+  return [
+    `SELECT ?label (MAX(?value) AS ?wert) WHERE {`,
+    `  ?item a dbo:Country ; ${property} ?raw .`,
+    `  BIND(xsd:decimal(REPLACE(STR(?raw), ",", "")) AS ?value)`,
+    `  FILTER(?value > 0)`,
+    `  ?item rdfs:label ?label . FILTER(lang(?label) = "en")`,
+    `} GROUP BY ?label ORDER BY DESC(?wert) LIMIT ${clamp(limit, 1, 50)}`,
+  ].join("\n");
+}
+
+function requireId(value: string, pattern: RegExp, name: string): string {
+  const trimmed = value.trim().toUpperCase();
+  if (!pattern.test(trimmed)) throw new Error(`${name} muss die Form ${pattern.source} haben.`);
+  return trimmed;
+}
+
+async function wikidataRanking(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
+  const query = rankingQuery(
+    String(args.class ?? ""),
+    String(args.property ?? ""),
+    args.country ? String(args.country) : undefined,
+    Number(args.limit ?? 10),
+  );
+  return runCuratedQuery("wikidata_sparql", query, runtime, "Rangliste");
+}
+
+async function wikidataTimeline(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
+  const query = timelineQuery(String(args.class ?? ""), String(args.property ?? ""));
+  return runCuratedQuery("wikidata_sparql", query, runtime, "Zeitreihe");
+}
+
+async function dbpediaRanking(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
+  const query = dbpediaRankingQuery(String(args.property ?? ""), Number(args.limit ?? 10));
+  return runCuratedQuery("dbpedia_sparql", query, runtime, "Rangliste");
+}
+
+async function runCuratedQuery(
+  tool: "wikidata_sparql" | "dbpedia_sparql",
+  query: string,
+  runtime: ToolRuntime,
+  label: string,
+): Promise<ToolResult> {
+  return tool === "wikidata_sparql"
+    ? wikidataSparql({ query }, runtime, label)
+    : dbpediaSparql({ query }, runtime, label);
+}
+
 /**
  * Zwei Syntaxfehler treten bei Wikidata-Abfragen immer wieder auf. Der
  * Fehlertext des Endpunkts nennt sie, sagt aber nicht, was zu tun ist.
  */
 export function correctionHint(message: string): string | undefined {
-  if (/encountered .*"?service/i.test(message)) {
+  if (/encountered\s+"[^"]*"\s*"?service"?/i.test(message)) {
     return "Hinweis: SERVICE wikibase:label muss innerhalb der geschweiften Klammern der WHERE-Klausel stehen, nicht dahinter.";
   }
   if (/bad aggregate/i.test(message)) {
-    return "Hinweis: Jede Variable, die nicht aggregiert wird, muss in GROUP BY stehen; alle anderen gehoeren in eine Aggregatfunktion.";
+    return "Hinweis: Bei einer Zaehlung nur Gruppenvariablen und Aggregate projizieren; SERVICE wikibase:label nur fuer die Gruppenvariable, sonst steht ein Label ausserhalb des Aggregats.";
+  }
+  if (/\b429\b|too many requests/i.test(message)) {
+    return "Hinweis: Der Endpunkt drosselt gerade. Wiederhole die Abfrage nicht sofort; antworte notfalls mit dem, was schon da ist.";
   }
   if (/zeitüberschreitung|timeout|timed out/i.test(message)) {
     return "Hinweis: Die Abfrage war zu langsam. Nimm eine konkrete Klasse ohne tiefe P279*-Pfade, filtere frueher und setze ein kleineres LIMIT.";
@@ -175,8 +316,12 @@ export interface ToolResult {
 export function knowledgeBlock(source: string, body: string): string {
   // Fremdtext darf die Klammer nicht schliessen: sonst stuende danach eine
   // Anweisung ausserhalb des Datenblocks.
-  const safe = body.replace(/<(\/?)(knowledge)([^>]*)>/gi, "&lt;$1$2$3&gt;");
-  return `<knowledge source="${source}">\n${safe}\n</knowledge>`;
+  return `<knowledge source="${source}">\n${maskToolTags(body)}\n</knowledge>`;
+}
+
+/** Maskiert beide Klammer-Tags, damit keine Sorte die andere aufbrechen kann. */
+export function maskToolTags(body: string): string {
+  return body.replace(/<(\/?)(knowledge|tool-error)([^>]*)>/gi, "&lt;$1$2$3&gt;");
 }
 
 /**
@@ -184,8 +329,7 @@ export function knowledgeBlock(source: string, body: string): string {
  * damit `<knowledge>` weiterhin nur bedeutet: Inhalt ist Datum, keine Anweisung.
  */
 export function toolError(body: string): string {
-  const safe = body.replace(/<(\/?)(tool-error)([^>]*)>/gi, "&lt;$1$2$3&gt;");
-  return `<tool-error>\n${safe}\n</tool-error>`;
+  return `<tool-error>\n${maskToolTags(body)}\n</tool-error>`;
 }
 
 /** Frist und Client-Abbruch kombiniert, damit kein Werkzeug weiterlaeuft. */
@@ -206,6 +350,12 @@ export async function executeTool(
         return await wikidataSearch(args, runtime);
       case "wikidata_entity":
         return await wikidataEntity(args, runtime);
+      case "wikidata_ranking":
+        return await wikidataRanking(args, runtime);
+      case "wikidata_timeline":
+        return await wikidataTimeline(args, runtime);
+      case "dbpedia_ranking":
+        return await dbpediaRanking(args, runtime);
       case "wikidata_sparql":
         return await wikidataSparql(args, runtime);
       case "dbpedia_lookup":
@@ -303,10 +453,14 @@ async function wikidataEntity(args: Record<string, unknown>, runtime: ToolRuntim
   return { content: knowledgeBlock("wikidata", `${text}${dbpedia}`), ok: true };
 }
 
-async function wikidataSparql(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
+async function wikidataSparql(
+  args: Record<string, unknown>,
+  runtime: ToolRuntime,
+  label?: string,
+): Promise<ToolResult> {
   const query = String(args.query ?? "");
   const result = await runSparql(WIKIDATA_SPARQL, query, {
-    timeoutMs: toolTimeout(runtime, 12000),
+    timeoutMs: toolTimeout(runtime, 14000),
     signal: runtime.signal,
   });
   const table = toCompactTable(result);
@@ -331,7 +485,7 @@ async function wikidataSparql(args: Record<string, unknown>, runtime: ToolRuntim
     kg: "wikidata",
     kind: "query",
     id: `wikidata-sparql:${hash(query)}`,
-    label: `Abfrage: ${truncate(query.replace(/\s+/g, " ").trim(), 70)}`,
+    label: `${label ?? "Abfrage"}: ${truncate(query.replace(/\s+/g, " ").trim(), 70)}`,
     url: "https://query.wikidata.org/",
     query,
   });
@@ -414,10 +568,14 @@ async function dbpediaLookup(args: Record<string, unknown>, runtime: ToolRuntime
   return { content: knowledgeBlock("dbpedia", `Treffer für "${term}"\n${body}`), ok: true };
 }
 
-async function dbpediaSparql(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
+async function dbpediaSparql(
+  args: Record<string, unknown>,
+  runtime: ToolRuntime,
+  label?: string,
+): Promise<ToolResult> {
   const query = String(args.query ?? "");
   const result = await runSparql(DBPEDIA_SPARQL, query, {
-    timeoutMs: toolTimeout(runtime, 15000),
+    timeoutMs: toolTimeout(runtime, 20000),
     signal: runtime.signal,
   });
   const table = toCompactTable(result);
@@ -427,7 +585,7 @@ async function dbpediaSparql(args: Record<string, unknown>, runtime: ToolRuntime
     kg: "dbpedia",
     kind: "query",
     id: `dbpedia-sparql:${hash(query)}`,
-    label: `Abfrage: ${truncate(query.replace(/\s+/g, " ").trim(), 70)}`,
+    label: `${label ?? "Abfrage"}: ${truncate(query.replace(/\s+/g, " ").trim(), 70)}`,
     url: "https://dbpedia.org/sparql",
     query,
   });

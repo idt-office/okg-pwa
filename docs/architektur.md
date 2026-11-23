@@ -57,9 +57,10 @@ DBpedia die bessere Quelle, für fast alles andere Wikidata.
 `ChatOpenAI`, Tool-Binding, Message-Typen und Streaming kommen aus LangChain.
 Die Schleife selbst ist eigen, weil drei Dinge harte Grenzen brauchen:
 
-1. Zeitbudget für die Werkzeugrunden (22 s), nicht pro Modellaufruf. Die
-   Schlussantwort hat eine eigene Frist von 15 s, damit ein ausgeschöpftes
-   Budget nicht mit einer leeren Antwort endet.
+1. Zeitbudget für die Werkzeugrunden (26 s), nicht pro Modellaufruf. Die
+   Schlussantwort hat eine eigene Frist von 15 s und wird bei leerer Antwort
+   einmal wiederholt, damit ein ausgeschöpftes Budget nicht mit einer leeren
+   Antwort endet.
 2. Rundenobergrenze (4), damit ein Agent nicht beliebig weiterforscht.
 3. Fortschritt als SSE-Ereignis, während er entsteht: der Nutzer sieht
    „wikidata_sparql läuft", nicht einen Spinner.
@@ -85,6 +86,16 @@ letzten zeichenbaren Abfragetabelle: Jahreszahlen als Linie, Ranglisten als
 Balken, doppelte x-Werte auf den größten Wert verdichtet. Das Ergebnis ist als
 „automatisch erzeugt" gekennzeichnet.
 
+## Kuratierte Werkzeuge vor freiem SPARQL
+
+Drei Formen decken den Großteil der Fragen ab: Rangliste nach Zahlenwert,
+Ereignisse je Jahr, Infobox-Rangliste. Dafür gibt es `wikidata_ranking`,
+`wikidata_timeline` und `dbpedia_ranking`; sie bauen ihre Abfrage selbst, prüfen
+die IDs und sortieren numerisch. Gemessen war freies SPARQL hier die
+Fehlerquelle: das Modell sortierte DBpedia-Strings lexikografisch und bekam
+"Bad aggregate" bei Zählungen, was je Lauf eine Runde kostete. Die freie Abfrage
+bleibt als Notausgang für alles, was nicht in diese drei Formen passt.
+
 ## SPARQL vom Modell, aber mit Zügel
 
 Aggregationen (Ranglisten, Zählungen, Zeitreihen) lassen sich nicht in feste
@@ -95,6 +106,7 @@ Werkzeuge pressen. Das Modell schreibt die Abfrage, `guardSparql` prüft:
   `CREATE`, `ADD`, `MOVE`, `COPY`, `WITH`),
 - `SERVICE` nur als `wikibase:label`,
 - `LIMIT` wird ergänzt, wenn keins dasteht, und auf 1000 gedeckelt,
+- Ergebnisse identischer Abfragen werden fünf Minuten zwischengespeichert,
 - Obergrenze 4000 Zeichen, Antworten über 8 MB werden abgebrochen.
 
 Die Prüfung arbeitet auf einer Fassung ohne IRIs, Literale und Kommentare, damit
@@ -102,7 +114,7 @@ weder `"DELETE ..."` in einem Label noch `#DROP` in einer IRI als Befehl zählt.
 
 ## Daten aus fremden Quellen sind Daten
 
-Wikidata und DBpedia sind offen editierbar. Jede Werkzeugantwort steckt in einem
+Wikidata und DBpedia sind offen editierbar. Wissensgraph-Antworten stecken in einem
 `<knowledge source="...">`-Block, und der System-Prompt sagt: Inhalt darin sind
 Daten, keine Anweisungen. Beim Bauen des Blocks werden `<knowledge` und
 `</knowledge` im Rumpf maskiert, damit Fremdtext die Klammer nicht schließen und

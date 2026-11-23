@@ -40,16 +40,15 @@ export function guardSparql(query: string): string {
   const bare = stripLiteralsAndComments(trimmed);
 
   // Ein umdefiniertes wikibase:-Präfix würde die SERVICE-Prüfung unten entwerten.
-  // Die übliche Deklaration auf die echte Ontologie bleibt erlaubt.
-  for (const match of trimmed.matchAll(/(?:^|\s)PREFIX\s+wikibase\s*:\s*<([^>]*)>/gi)) {
-    if ((match[1] ?? "").trim() !== "http://wikiba.se/ontology#") {
-      throw new QueryRejected(
-        "PREFIX wikibase: darf nur auf http://wikiba.se/ontology# zeigen.",
-      );
-    }
-  }
-  if (/(?:^|\s)PREFIX\s+wikibase\s*:(?!\s*<)/i.test(trimmed)) {
-    throw new QueryRejected("PREFIX wikibase: muss auf http://wikiba.se/ontology# zeigen.");
+  // Jede Deklaration muss auf die echte Ontologie zeigen; die Anzahl muss
+  // übereinstimmen, damit eine zweite Deklaration ohne Leerzeichen auffällt.
+  const withoutComments = trimmed.replace(/(?:^|\s)#[^\n]*/g, " ");
+  const declared = [...withoutComments.matchAll(/PREFIX\s+wikibase\s*:/gi)].length;
+  const canonical = [
+    ...withoutComments.matchAll(/PREFIX\s+wikibase\s*:\s*<http:\/\/wikiba\.se\/ontology#>/gi),
+  ].length;
+  if (declared !== canonical) {
+    throw new QueryRejected("PREFIX wikibase: darf nur auf http://wikiba.se/ontology# zeigen.");
   }
 
   const withoutPrefixes = bare.replace(/(?:\b(?:PREFIX|BASE)\s+\S+\s*<[^>]*>\s*)+/gi, " ").trim();
@@ -72,24 +71,34 @@ export function guardSparql(query: string): string {
 
   // Nur das abschließende LIMIT ist das äußere. Ein LIMIT in einer Subquery
   // darf den Deckel nicht ersetzen, und Literale werden nicht angefasst.
-  const trailingLimit = /\bLIMIT\s+(\d+)\s*$/i.exec(trimmed);
+  const body = stripTrailingComments(trimmed);
+  const tail = trimmed.slice(body.length);
+
+  const trailingLimit = /\bLIMIT\s+(\d+)\s*$/i.exec(body);
   if (trailingLimit) {
     const value = Number.parseInt(trailingLimit[1] ?? "", 10);
     const capped = Number.isFinite(value) ? Math.min(value, MAX_LIMIT) : DEFAULT_LIMIT;
-    return `${trimmed.slice(0, trailingLimit.index)}LIMIT ${capped}`;
+    return `${body.slice(0, trailingLimit.index)}LIMIT ${capped}${tail}`;
   }
 
   // SPARQL erlaubt OFFSET vor LIMIT, deshalb genügt Einsetzen beziehungsweise Anhängen.
-  const trailingOffset = /\bOFFSET\s+\d+\s*$/i.exec(trimmed);
+  const trailingOffset = /\bOFFSET\s+\d+\s*$/i.exec(body);
   if (trailingOffset) {
-    return `${trimmed.slice(0, trailingOffset.index)}LIMIT ${DEFAULT_LIMIT} ${trimmed.slice(trailingOffset.index)}`;
+    return `${body.slice(0, trailingOffset.index)}LIMIT ${DEFAULT_LIMIT} ${body.slice(trailingOffset.index)}${tail}`;
   }
   return `${trimmed}\nLIMIT ${DEFAULT_LIMIT}`;
 }
 
+/** Schneidet abschließende Kommentare und Leerraum ab; der Rest ist die Anweisung. */
+export function stripTrailingComments(query: string): string {
+  return query.replace(/(?:\s*#[^\n]*)*\s*$/, "");
+}
+
 /** Das äußere Limit, mit dem die Abfrage hinausgeht. */
 export function appliedLimit(query: string): number {
-  const match = /\bLIMIT\s+(\d+)\s*$/i.exec(stripLiteralsAndComments(query));
+  const match = /\bLIMIT\s+(\d+)\s*$/i.exec(
+    stripLiteralsAndComments(stripTrailingComments(query)),
+  );
   const value = Number.parseInt(match?.[1] ?? "", 10);
   return Number.isFinite(value) ? value : DEFAULT_LIMIT;
 }
@@ -108,6 +117,10 @@ export function stripLiteralsAndComments(query: string): string {
     .replace(/#[^\n]*/g, "");
 }
 
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_MAX = 50;
+const cache = new Map<string, { at: number; result: SparqlResult }>();
+
 export async function runSparql(
   endpoint: string,
   query: string,
@@ -115,6 +128,12 @@ export async function runSparql(
 ): Promise<SparqlResult> {
   const guarded = guardSparql(query);
   const limit = appliedLimit(guarded);
+
+  const cacheKey = `${endpoint}\u0000${guarded}`;
+  const hit = cache.get(cacheKey);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+    return { ...hit.result, truncated: hit.result.rows.length >= limit };
+  }
   const { timeoutMs = 30000, signal } = options;
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -162,7 +181,13 @@ export async function runSparql(
     return row;
   });
 
-  return { vars, rows, truncated: rows.length >= limit, limit };
+  const result: SparqlResult = { vars, rows, truncated: rows.length >= limit, limit };
+  if (cache.size >= CACHE_MAX) {
+    const oldest = [...cache.entries()].sort((left, right) => left[1].at - right[1].at)[0];
+    if (oldest) cache.delete(oldest[0]);
+  }
+  cache.set(cacheKey, { at: Date.now(), result });
+  return result;
 }
 
 async function readCapped(response: Response, maxBytes: number): Promise<string> {

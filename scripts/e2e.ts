@@ -14,7 +14,12 @@ interface Case {
   id: number;
   question: string;
   enrich: boolean;
-  expect: { tools: boolean; chart: boolean };
+  expect: {
+    tools: boolean;
+    chart: boolean;
+    /** Muss in der Antwort stehen, sonst ist sie inhaltlich falsch. */
+    answer?: RegExp;
+  };
 }
 
 const cases: Case[] = [
@@ -29,14 +34,16 @@ const cases: Case[] = [
     id: 2,
     question: "Welche Länder haben das höchste BIP pro Kopf? Nenne die fünf obersten.",
     enrich: true,
-    expect: { tools: true, chart: true },
+    // Die Spitzengruppe sind Steueroasen; steht keine davon oben, wurde
+    // lexikografisch sortiert (Australien, Ungarn, Tschechien).
+    expect: { tools: true, chart: true, answer: /Monaco|Liechtenstein|Luxemburg/ },
   },
   {
     id: 3,
     question:
       "Wie viele Pumpspeicherkraftwerke gibt es in Deutschland, und welche haben die größte Leistung?",
     enrich: true,
-    expect: { tools: true, chart: true },
+    expect: { tools: true, chart: true, answer: /42/ },
   },
   {
     id: 4,
@@ -109,8 +116,13 @@ for (const testCase of selected) {
   if (testCase.expect.tools && tools === 0) problems.push("kein Werkzeugaufruf");
   if (!testCase.expect.tools && tools > 0) problems.push("Werkzeug trotz abgeschalteter Anreicherung");
   if (testCase.expect.chart && charts === 0) problems.push("kein Diagramm");
+  if (!testCase.expect.chart && charts === 0 && /diagramm|grafik/i.test(text)) {
+    problems.push("Diagramm erwähnt, aber keins erzeugt");
+  }
+  if (testCase.expect.answer && !testCase.expect.answer.test(text)) {
+    problems.push(`Antwort enthält ${testCase.expect.answer} nicht`);
+  }
   if (errors > 0) problems.push(`${errors} Fehlerereignis(se)`);
-  if (toolErrors > 0) problems.push(`${toolErrors} Werkzeugfehler`);
 
   console.log(
     `    Werkzeuge: ${tools} (${toolNames.join(", ")}), Fehler: ${toolErrors}, Diagramme: ${charts}, Quellen: ${sources.length}, ${elapsed} ms`,
@@ -121,6 +133,9 @@ for (const testCase of selected) {
   if (problems.length > 0) {
     failures += 1;
     console.log(`    PROBLEM: ${problems.join(", ")}`);
+  } else if (toolErrors > 0) {
+    // Ein korrigierter Werkzeugfehler ist kein Fehlschlag, aber sichtbar.
+    console.log(`    OK (mit ${toolErrors} korrigierten Werkzeugfehler(n))`);
   } else {
     console.log("    OK");
   }
