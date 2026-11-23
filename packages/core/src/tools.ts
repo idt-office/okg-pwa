@@ -300,11 +300,15 @@ export function correctionHint(message: string, tool?: string): string | undefin
   if (/\b429\b|too many requests/i.test(message)) {
     return "Hinweis: Der Endpunkt drosselt gerade. Wiederhole die Abfrage nicht sofort; antworte notfalls mit dem, was schon da ist.";
   }
-  if (/fetch failed|ECONNRESET|ECONNREFUSED|socket hang up|network|other side closed/i.test(message)) {
+  if (
+    /fetch failed|ECONNRESET|ECONNREFUSED|socket hang up|network|other side closed|\b50[234]\b/i.test(
+      message,
+    )
+  ) {
     // Keine Ersatzquelle empfehlen: fuer BIP pro Kopf etwa ist Wikidata P2132
     // eine Teilmenge, eine Ausweichrangliste waere nachweislich falsch.
-    const source = tool?.includes("dbpedia") ? "dbpedia.org" : "query.wikidata.org";
-    return `Hinweis: ${source} ist gerade nicht erreichbar; der Aufruf wurde bereits einmal wiederholt. Wenn die Frage ohne diese Quelle nicht beantwortbar ist, sage den Ausfall und liefere keine Ersatzrangliste aus einer lueckenhaften anderen Quelle.`;
+    const source = tool ? failingHost(tool) : "Die Quelle";
+    return `Hinweis: ${source} ist gerade nicht erreichbar; der Aufruf wurde bereits mehrfach wiederholt. Wenn die Frage ohne diese Quelle nicht beantwortbar ist, sage den Ausfall und liefere keine Ersatzrangliste aus einer lueckenhaften anderen Quelle.`;
   }
   if (/zeitüberschreitung|timeout|timed out/i.test(message)) {
     return tool?.includes("dbpedia")
@@ -312,6 +316,21 @@ export function correctionHint(message: string, tool?: string): string | undefin
       : "Hinweis: Die Abfrage war zu langsam. Nimm eine konkrete Klasse ohne tiefe P279*-Pfade, filtere frueher und setze ein kleineres LIMIT.";
   }
   return undefined;
+}
+
+/** Welcher Host hinter einem Werkzeug steht; der Hinweis soll den richtigen nennen. */
+function failingHost(tool: string): string {
+  if (tool === "dbpedia_lookup") return "lookup.dbpedia.org";
+  if (tool === "dbpedia_sparql" || tool === "dbpedia_ranking") return "dbpedia.org";
+  if (tool === "wikidata_search" || tool === "wikidata_entity") return "www.wikidata.org";
+  if (
+    tool === "wikidata_sparql" ||
+    tool === "wikidata_ranking" ||
+    tool === "wikidata_timeline"
+  ) {
+    return "query.wikidata.org";
+  }
+  return "Der Endpunkt";
 }
 
 export interface ToolRuntime {

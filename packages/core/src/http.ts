@@ -25,20 +25,24 @@ export async function fetchJson<T>(url: string, options: FetchOptions = {}): Pro
 
   let response: Response | undefined;
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Gemessen: dbpedia.org setzt einzelne Verbindungen aus und ist Sekunden
+  // spaeter wieder da. Drei Versuche mit wachsender Pause kosten im Fehlerfall
+  // gut 4 s, im Erfolgsfall nichts.
+  const attempts = 3;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       response = await request();
-      if (response.status >= 502 && response.status <= 504 && attempt === 0) {
-        await backoff();
+      if (response.status >= 502 && response.status <= 504 && attempt < attempts - 1) {
+        await backoff(attempt);
         continue;
       }
       break;
     } catch (error) {
       lastError = error;
-      if (signal?.aborted || !isTransportError(error) || attempt === 1) {
+      if (signal?.aborted || !isTransportError(error) || attempt === attempts - 1) {
         throw new Error(`Anfrage fehlgeschlagen (${url}): ${describeError(error)}`);
       }
-      await backoff();
+      await backoff(attempt);
     }
   }
   if (!response) {
@@ -84,7 +88,7 @@ export function isTransportError(error: unknown): boolean {
   );
 }
 
-/** Kurze Pause vor dem zweiten Versuch; ein Aussetzer braucht einen Moment. */
-export function backoff(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 1200));
+/** Pause vor dem naechsten Versuch; ein Aussetzer braucht einen Moment. */
+export function backoff(attempt = 0): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1200 : 3000));
 }

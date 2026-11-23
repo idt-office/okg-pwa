@@ -271,3 +271,17 @@ describe("dbpedia_ranking", () => {
     expect(() => dbpediaRankingQuery("dbp:x } DROP", 5)).toThrow(/dbp:name/);
   });
 });
+
+describe("correctionHint: dauerhafter 50x und richtiger Host", () => {
+  it("behandelt einen dauerhaften 503 wie einen Ausfall", () => {
+    expect(correctionHint("SPARQL-Fehler 503: weg", "dbpedia_ranking")).toContain(
+      "nicht erreichbar",
+    );
+  });
+
+  it("nennt bei den JSON-APIs den richtigen Host", () => {
+    expect(correctionHint("HTTP 502 von x", "wikidata_search")).toContain("www.wikidata.org");
+    expect(correctionHint("HTTP 502 von x", "dbpedia_lookup")).toContain("lookup.dbpedia.org");
+    expect(correctionHint("fetch failed", "wikidata_ranking")).toContain("query.wikidata.org");
+  });
+});

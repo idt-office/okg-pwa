@@ -39,6 +39,7 @@ export function systemPrompt(options: PromptOptions): string {
     "",
     "ENTITÄTEN, NICHT RATEN:",
     "- Rate niemals eine Q-ID. Löse den Begriff mit wikidata_search auf.",
+    "- Q-IDs darfst du nur nennen, wenn sie wortwörtlich in einem Werkzeugergebnis stehen. Sonst antworte ohne Q-IDs; die Labels genügen.",
     "- Wähle die Klasse, die zur Frage passt: für Anlagen eine Klasse wie Kernkraftwerk (Q134447) oder Pumpspeicherkraftwerk (Q339353), nicht die Energieform (Q11379).",
     "- Passt kein Treffer, suche mit einem anderen Wort, statt eine ID zu erfinden.",
     "",

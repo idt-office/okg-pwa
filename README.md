@@ -81,7 +81,7 @@ werden im Rumpf maskiert, bevor der Block gebaut wird.
 ## Prüfen
 
 ```bash
-npm test          # 146 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
+npm test          # 148 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
 npm run typecheck
 npm run e2e       # fünf Abnahmefälle gegen die echten Endpunkte
 ```
@@ -112,11 +112,11 @@ node scripts/record-fixtures.mjs
 - query.wikidata.org drosselt bei vielen Anfragen pro Minute (HTTP 429). Der
   Client weist darauf hin, statt blind zu wiederholen; identische Abfragen
   werden fünf Minuten zwischengespeichert.
-- Ein Netzwerkaussetzer (`fetch failed`, 502-504) wird nach 1,2 s einmal
-  wiederholt, für SPARQL wie für die JSON-APIs; ein fachlicher Fehler (400)
-  nicht, da hilft nur eine andere Abfrage. Ist die Quelle danach weg, sagt die
-  Antwort den Ausfall, statt aus einer lückenhaften anderen Quelle eine
-  Ersatzrangliste zu bauen.
+- Ein Netzwerkaussetzer (`fetch failed`, 502-504) wird bis zu dreimal versucht
+  (1,2 s und 3 s Pause), für SPARQL wie für die JSON-APIs; ein fachlicher
+  Fehler (400) nicht, da hilft nur eine andere Abfrage. Ist die Quelle danach
+  weg, sagt die Antwort den Ausfall, statt aus einer lückenhaften anderen
+  Quelle eine Ersatzrangliste zu bauen.
 - Der Verlauf liegt in IndexedDB im Browser, nicht auf dem Server.
 
 Entscheidungen und Messwerte, die zu diesem Aufbau geführt haben:

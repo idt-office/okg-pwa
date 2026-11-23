@@ -284,16 +284,16 @@ describe("runSparql", () => {
     expect(result.rows).toEqual([{ a: "1" }]);
   });
 
-  it("gibt nach zwei 503 auf", async () => {
+  it("gibt nach drei 503 auf", async () => {
     let calls = 0;
     vi.stubGlobal("fetch", async () => {
       calls += 1;
       return new Response("weg", { status: 503 });
     });
     await expect(
-      runSparql(endpoint, "SELECT ?a WHERE { ?a ?p ?o } # 503-zweimal"),
+      runSparql(endpoint, "SELECT ?a WHERE { ?a ?p ?o } # 503-dreimal"),
     ).rejects.toThrow(/503/);
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
   });
 
   it("gibt auch beim ersten Aufruf eine Kopie der Zeilen zurück", async () => {

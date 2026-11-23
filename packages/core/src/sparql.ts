@@ -174,22 +174,24 @@ export async function runSparql(
 
   let response: Response | undefined;
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Nur echte Aussetzer des Servers werden wiederholt, kein 400; drei Versuche
+  // mit wachsender Pause.
+  const attempts = 3;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       response = await request();
-      // Nur echte Aussetzer des Servers werden wiederholt, kein 400.
-      if (response.status >= 502 && response.status <= 504 && attempt === 0) {
-        await backoff();
+      if (response.status >= 502 && response.status <= 504 && attempt < attempts - 1) {
+        await backoff(attempt);
         continue;
       }
       break;
     } catch (error) {
       lastError = error;
       // Ein Abbruch des Clients darf nicht wiederholt werden.
-      if (signal?.aborted || !isTransportError(error) || attempt === 1) {
+      if (signal?.aborted || !isTransportError(error) || attempt === attempts - 1) {
         throw new Error(`SPARQL-Anfrage fehlgeschlagen: ${describeError(error)}`);
       }
-      await backoff();
+      await backoff(attempt);
     }
   }
   if (!response) {

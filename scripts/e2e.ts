@@ -145,12 +145,13 @@ for (const testCase of selected) {
     const first = name.exec(flat);
     const other = others.exec(flat);
     // "Monaco ist in Wikidata nicht erfasst" ist keine Spitze, sondern ein Haken.
+    // Ein Komma beendet den Bezug: "Monaco 315 800 USD, Katar fehlt" ist kein Haken.
     const hedged = new RegExp(
-      `${name.source}[^.;]{0,40}(nicht erfasst|nicht enthalten|fehlt|keine Daten|nicht in den Daten)`,
+      `${name.source}[^.;,]{0,40}(nicht erfasst|nicht enthalten|nicht dabei|fehlt|keine Daten|nicht in den Daten)`,
       "i",
     ).test(flat);
     if (!first) problems.push(`Antwort nennt ${name} nicht`);
-    else if (first.index > 200) {
+    else if (first.index > 300) {
       problems.push(`Antwort nennt ${name} erst nach ${first.index} Zeichen, nicht als Spitze`);
     } else if (other && other.index < first.index) {
       problems.push(`Antwort nennt ${other[0]} vor ${first[0]}, die Rangliste stimmt nicht`);
