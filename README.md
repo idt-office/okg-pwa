@@ -81,7 +81,7 @@ werden im Rumpf maskiert, bevor der Block gebaut wird.
 ## Prüfen
 
 ```bash
-npm test          # 132 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
+npm test          # 137 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
 npm run typecheck
 npm run e2e       # fünf Abnahmefälle gegen die echten Endpunkte
 ```
@@ -105,12 +105,15 @@ node scripts/record-fixtures.mjs
 - DBpedia liefert über SPARQL **kein** `dbo:abstract` (gemessen:
   `ASK { ?s dbo:abstract ?a }` = `false`), Prosa nur über die Lookup-API.
 - DBpedia-Infobox-Zahlen sind Strings mit Einheiten, teils mehrfach
-  (`Monaco` dreimal) und enthalten Nicht-Staaten (`EFTA`). Normalisierung und
-  Plausibilität bleiben Aufgabe des Modells, das sie im Zweifel benennen muss.
+  (`Monaco` dreimal) und enthalten Nicht-Staaten (`EFTA`). `dbpedia_ranking`
+  dedupliziert, castet numerisch und lässt nur Staaten mit Hauptstadt zu; wer
+  frei abfragt, muss das selbst tun.
 - Ohne HTTPS oder `localhost` kein PWA-Install.
 - query.wikidata.org drosselt bei vielen Anfragen pro Minute (HTTP 429). Der
   Client weist darauf hin, statt blind zu wiederholen; identische Abfragen
   werden fünf Minuten zwischengespeichert.
+- Ein Netzwerkaussetzer (`fetch failed`, 502-504) wird einmal wiederholt; ein
+  fachlicher Fehler (400) nicht, da hilft nur eine andere Abfrage.
 - Der Verlauf liegt in IndexedDB im Browser, nicht auf dem Server.
 
 Entscheidungen und Messwerte, die zu diesem Aufbau geführt haben:

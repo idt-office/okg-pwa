@@ -300,6 +300,11 @@ export function correctionHint(message: string, tool?: string): string | undefin
   if (/\b429\b|too many requests/i.test(message)) {
     return "Hinweis: Der Endpunkt drosselt gerade. Wiederhole die Abfrage nicht sofort; antworte notfalls mit dem, was schon da ist.";
   }
+  if (/fetch failed|ECONNRESET|ECONNREFUSED|socket hang up|network|other side closed/i.test(message)) {
+    return tool?.includes("dbpedia")
+      ? "Hinweis: dbpedia.org ist gerade nicht erreichbar. Nimm fuer diese Frage die Wikidata-Quelle (wikidata_ranking, wikidata_timeline, wikidata_sparql), statt den Aufruf zu wiederholen."
+      : "Hinweis: query.wikidata.org ist gerade nicht erreichbar. Wiederhole den Aufruf nicht sofort; nutze die andere Quelle oder antworte mit dem, was schon da ist.";
+  }
   if (/zeitüberschreitung|timeout|timed out/i.test(message)) {
     return tool?.includes("dbpedia")
       ? "Hinweis: Die DBpedia-Abfrage war zu langsam. Weniger Zeilen, konkrete Property, kein ORDER BY ueber alle Staaten."

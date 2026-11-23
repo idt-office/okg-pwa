@@ -21,6 +21,12 @@ interface Case {
     answer?: RegExp;
     /** Darf nicht dastehen: ein Verband als Land, ein Diagramm ohne Bild. */
     notAnswer?: RegExp;
+    /**
+     * Die genannte Spitze muss vor allen anderen Kandidaten stehen. Eine
+     * Erwähnung irgendwo im Text genügt nicht: "Australien 54 348 ... (z. B.
+     * Luxemburg fehlt)" nennt Luxemburg, ist aber die falsche Rangliste.
+     */
+    rankFirst?: { name: RegExp; others: RegExp };
   };
 }
 
@@ -36,13 +42,17 @@ const cases: Case[] = [
     id: 2,
     question: "Welche Länder haben das höchste BIP pro Kopf? Nenne die fünf obersten.",
     enrich: true,
-    // Die Spitzengruppe sind Steueroasen; steht keine davon oben, wurde
-    // lexikografisch sortiert (Australien, Ungarn, Tschechien).
+    // Die Spitzengruppe sind Steueroasen. Steht Monaco nicht zuerst, wurde
+    // lexikografisch sortiert (Australien, Ungarn, ...).
     expect: {
       tools: true,
       chart: true,
-      answer: /Monaco|Liechtenstein|Luxemburg/,
-      notAnswer: /EFTA|European Free Trade/,
+      rankFirst: {
+        name: /Monaco/i,
+        others:
+          /Liechtenstein|Luxemburg|Luxembourg|Irland|Ireland|Schweiz|Switzerland|Katar|Qatar|Australien|Neuseeland|Ungarn|Tschechien|Spanien|Singapur|Singapore/i,
+      },
+      notAnswer: /European Free Trade|Freihandelsassoziation/i,
     },
   },
   {
@@ -128,6 +138,15 @@ for (const testCase of selected) {
   }
   if (testCase.expect.answer && !testCase.expect.answer.test(text)) {
     problems.push(`Antwort enthält ${testCase.expect.answer} nicht`);
+  }
+  if (testCase.expect.rankFirst) {
+    const { name, others } = testCase.expect.rankFirst;
+    const first = name.exec(text);
+    const other = others.exec(text);
+    if (!first) problems.push(`Antwort nennt ${name} nicht`);
+    else if (other && other.index < first.index) {
+      problems.push(`Antwort nennt ${other[0]} vor ${first[0]}, die Rangliste stimmt nicht`);
+    }
   }
   if (testCase.expect.notAnswer?.test(text)) {
     problems.push(`Antwort nennt ${testCase.expect.notAnswer}, das ist kein Land`);

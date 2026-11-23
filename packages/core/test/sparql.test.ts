@@ -241,6 +241,47 @@ describe("runSparql", () => {
     await expect(runSparql(endpoint, "DROP GRAPH <g>")).rejects.toThrow(QueryRejected);
     expect(called).toBe(false);
   });
+
+  it("wiederholt einen Netzwerkaussetzer genau einmal", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError("fetch failed");
+      return new Response(
+        JSON.stringify({ head: { vars: ["a"] }, results: { bindings: [{ a: { value: "1" } }] } }),
+        { status: 200 },
+      );
+    });
+    const result = await runSparql(endpoint, "SELECT ?a WHERE { ?a ?p ?o } # netzfehler");
+    expect(calls).toBe(2);
+    expect(result.rows).toEqual([{ a: "1" }]);
+  });
+
+  it("wiederholt einen fachlichen HTTP-Fehler nicht", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls += 1;
+      return new Response("kaputt", { status: 400 });
+    });
+    await expect(runSparql(endpoint, "SELECT ?a WHERE { ?a ?p ?o } # fachfehler")).rejects.toThrow(
+      /400/,
+    );
+    expect(calls).toBe(1);
+  });
+
+  it("gibt auch beim ersten Aufruf eine Kopie der Zeilen zurück", async () => {
+    vi.stubGlobal("fetch", async () =>
+      new Response(
+        JSON.stringify({ head: { vars: ["a"] }, results: { bindings: [{ a: { value: "1" } }] } }),
+        { status: 200 },
+      ),
+    );
+    const query = "SELECT ?a WHERE { ?a ?p ?o } # cache-kopie";
+    const first = await runSparql(endpoint, query);
+    first.rows.push({ a: "manipuliert" });
+    const second = await runSparql(endpoint, query);
+    expect(second.rows).toEqual([{ a: "1" }]);
+  });
 });
 
 describe("toCompactTable", () => {
@@ -295,5 +336,17 @@ describe("guardSparql: LIMIT mit OFFSET und Literalen", () => {
 
   it("erkennt einen abschließenden Kommentar auch nach einem Literal", () => {
     expect(stripTrailingComments('ASK { ?s ?p "x#" } # Ende')).toBe('ASK { ?s ?p "x#" }');
+  });
+
+  it("verschluckt kein LIMIT hinter einem Tripel-Einfach-Literal", () => {
+    const query = "ASK { ?s ?p '''it's # hidden''' } LIMIT 1";
+    expect(guardSparql(query)).toBe(query);
+  });
+
+  it("ergänzt ein äußeres LIMIT auch bei innerem LIMIT und OFFSET", () => {
+    const guarded = guardSparql(
+      "SELECT ?x WHERE { { SELECT ?x WHERE { ?x ?p ?o } LIMIT 100000 } } OFFSET 0",
+    );
+    expect(guarded).toMatch(/LIMIT 200 OFFSET 0$/);
   });
 });

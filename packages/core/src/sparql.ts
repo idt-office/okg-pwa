@@ -82,10 +82,11 @@ export function guardSparql(query: string): string {
   }
 
   // OFFSET ohne LIMIT davor: ergänzen. Steht schon eines im Text, bleibt die
-  // Abfrage unangetastet, statt ein zweites LIMIT zu erzeugen.
+  // Abfrage unangetastet, statt ein zweites LIMIT zu erzeugen. Nur ein Limit,
+  // das selbst am Ende steht, deckt die Abfrage; eines in einer Subquery nicht.
   const trailingOffset = /\bOFFSET\s+\d+\s*$/i.exec(body);
   if (trailingOffset) {
-    if (/\bLIMIT\s+\d+/i.test(stripLiteralsAndComments(body))) return `${body}${tail}`;
+    if (/\bLIMIT\s+\d+\s*$/i.test(stripLiteralsAndComments(body))) return `${body}${tail}`;
     return `${body.slice(0, trailingOffset.index)}LIMIT ${DEFAULT_LIMIT} ${body.slice(trailingOffset.index)}${tail}`;
   }
   return `${trimmed}\nLIMIT ${DEFAULT_LIMIT}`;
@@ -105,6 +106,7 @@ function maskLiterals(query: string): string {
   return query
     .replace(/<[^>\s]*>/g, (match) => `<${"i".repeat(Math.max(0, match.length - 2))}>`)
     .replace(/"""(?:[^"\\]|\\[\s\S]|"(?!""))*"""/g, (match) => `"""${"l".repeat(Math.max(0, match.length - 6))}"""`)
+    .replace(/'''(?:[^'\\]|\\[\s\S]|'(?!''))*'''/g, (match) => `'''${"l".repeat(Math.max(0, match.length - 6))}'''`)
     .replace(/"(?:[^"\\\n]|\\.)*"/g, (match) => `"${"l".repeat(Math.max(0, match.length - 2))}"`)
     .replace(/'(?:[^'\\\n]|\\.)*'/g, (match) => `'${"l".repeat(Math.max(0, match.length - 2))}'`);
 }
@@ -158,9 +160,8 @@ export async function runSparql(
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
-  let response: Response;
-  try {
-    response = await fetch(endpoint, {
+  const request = (): Promise<Response> =>
+    fetch(endpoint, {
       method: "POST",
       signal: combined,
       headers: {
@@ -170,8 +171,29 @@ export async function runSparql(
       },
       body: new URLSearchParams({ query: guarded }).toString(),
     });
-  } catch (error) {
-    throw new Error(`SPARQL-Anfrage fehlgeschlagen: ${describeError(error)}`);
+
+  let response: Response | undefined;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await request();
+      // Nur echte Aussetzer des Servers werden wiederholt, kein 400.
+      if (response.status >= 502 && response.status <= 504 && attempt === 0) {
+        await backoff(attempt);
+        continue;
+      }
+      break;
+    } catch (error) {
+      lastError = error;
+      // Ein Abbruch des Clients darf nicht wiederholt werden.
+      if (signal?.aborted || !isTransportError(error) || attempt === 1) {
+        throw new Error(`SPARQL-Anfrage fehlgeschlagen: ${describeError(error)}`);
+      }
+      await backoff(attempt);
+    }
+  }
+  if (!response) {
+    throw new Error(`SPARQL-Anfrage fehlgeschlagen: ${describeError(lastError)}`);
   }
 
   const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
@@ -202,13 +224,30 @@ export async function runSparql(
   });
 
   const result: SparqlResult = { vars, rows, truncated: rows.length >= limit, limit };
-  while (cache.size >= CACHE_MAX || cachedRows() + rows.length > CACHE_MAX_ROWS) {
-    const oldest = [...cache.entries()].sort((left, right) => left[1].at - right[1].at)[0];
-    if (!oldest) break;
-    cache.delete(oldest[0]);
+  // Zu grosse Ergebnisse werden nicht zwischengespeichert, sonst sprengt ein
+  // einzelner Treffer die Zeilengrenze.
+  if (rows.length <= CACHE_MAX_ROWS) {
+    while (cache.size >= CACHE_MAX || cachedRows() + rows.length > CACHE_MAX_ROWS) {
+      const oldest = [...cache.entries()].sort((left, right) => left[1].at - right[1].at)[0];
+      if (!oldest) break;
+      cache.delete(oldest[0]);
+    }
+    cache.set(cacheKey, { at: Date.now(), result });
   }
-  cache.set(cacheKey, { at: Date.now(), result });
-  return result;
+  // Der Cache und der Aufrufer teilen keine Arrays.
+  return { ...result, rows: result.rows.map((row) => ({ ...row })) };
+}
+
+/** Netzwerkaussetzer, keine fachlichen Fehler. */
+export function isTransportError(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return /fetch failed|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network|other side closed/i.test(
+    message,
+  );
+}
+
+function backoff(attempt: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
 }
 
 function cachedRows(): number {

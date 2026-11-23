@@ -107,6 +107,7 @@ Werkzeuge pressen. Das Modell schreibt die Abfrage, `guardSparql` prüft:
 - `SERVICE` nur als `wikibase:label`,
 - `LIMIT` wird ergänzt, wenn keins dasteht, und auf 1000 gedeckelt,
 - Ergebnisse identischer Abfragen werden fünf Minuten zwischengespeichert,
+- ein Netzwerkaussetzer wird einmal wiederholt, ein fachlicher Fehler nicht,
 - Obergrenze 4000 Zeichen, Antworten über 8 MB werden abgebrochen.
 
 Die Prüfung arbeitet auf einer Fassung ohne IRIs, Literale und Kommentare, damit
