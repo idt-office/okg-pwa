@@ -74,16 +74,18 @@ export function guardSparql(query: string): string {
   const body = stripTrailingComments(trimmed);
   const tail = trimmed.slice(body.length);
 
-  const trailingLimit = /\bLIMIT\s+(\d+)\s*$/i.exec(body);
+  const trailingLimit = /(\bLIMIT\s+)(\d+)((?:\s+OFFSET\s+\d+)?)\s*$/i.exec(body);
   if (trailingLimit) {
-    const value = Number.parseInt(trailingLimit[1] ?? "", 10);
+    const value = Number.parseInt(trailingLimit[2] ?? "", 10);
     const capped = Number.isFinite(value) ? Math.min(value, MAX_LIMIT) : DEFAULT_LIMIT;
-    return `${body.slice(0, trailingLimit.index)}LIMIT ${capped}${tail}`;
+    return `${body.slice(0, trailingLimit.index)}${trailingLimit[1]}${capped}${trailingLimit[3] ?? ""}${tail}`;
   }
 
-  // SPARQL erlaubt OFFSET vor LIMIT, deshalb genügt Einsetzen beziehungsweise Anhängen.
+  // OFFSET ohne LIMIT davor: ergänzen. Steht schon eines im Text, bleibt die
+  // Abfrage unangetastet, statt ein zweites LIMIT zu erzeugen.
   const trailingOffset = /\bOFFSET\s+\d+\s*$/i.exec(body);
   if (trailingOffset) {
+    if (/\bLIMIT\s+\d+/i.test(stripLiteralsAndComments(body))) return `${body}${tail}`;
     return `${body.slice(0, trailingOffset.index)}LIMIT ${DEFAULT_LIMIT} ${body.slice(trailingOffset.index)}${tail}`;
   }
   return `${trimmed}\nLIMIT ${DEFAULT_LIMIT}`;
@@ -91,12 +93,25 @@ export function guardSparql(query: string): string {
 
 /** Schneidet abschließende Kommentare und Leerraum ab; der Rest ist die Anweisung. */
 export function stripTrailingComments(query: string): string {
-  return query.replace(/(?:\s*#[^\n]*)*\s*$/, "");
+  // Auf einer längengetreuen Maske suchen, damit ein "#" in einem Literal oder
+  // einer IRI nicht den Rest der Abfrage verschluckt.
+  const masked = maskLiterals(query);
+  const match = /(?:\s*#[^\n]*)*\s*$/.exec(masked);
+  if (!match || match.index === undefined) return query;
+  return query.slice(0, match.index);
+}
+
+function maskLiterals(query: string): string {
+  return query
+    .replace(/<[^>\s]*>/g, (match) => `<${"i".repeat(Math.max(0, match.length - 2))}>`)
+    .replace(/"""(?:[^"\\]|\\[\s\S]|"(?!""))*"""/g, (match) => `"""${"l".repeat(Math.max(0, match.length - 6))}"""`)
+    .replace(/"(?:[^"\\\n]|\\.)*"/g, (match) => `"${"l".repeat(Math.max(0, match.length - 2))}"`)
+    .replace(/'(?:[^'\\\n]|\\.)*'/g, (match) => `'${"l".repeat(Math.max(0, match.length - 2))}'`);
 }
 
 /** Das äußere Limit, mit dem die Abfrage hinausgeht. */
 export function appliedLimit(query: string): number {
-  const match = /\bLIMIT\s+(\d+)\s*$/i.exec(
+  const match = /\bLIMIT\s+(\d+)\s*(?:OFFSET\s+\d+\s*)?$/i.exec(
     stripLiteralsAndComments(stripTrailingComments(query)),
   );
   const value = Number.parseInt(match?.[1] ?? "", 10);
@@ -119,6 +134,7 @@ export function stripLiteralsAndComments(query: string): string {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX = 50;
+const CACHE_MAX_ROWS = 20_000;
 const cache = new Map<string, { at: number; result: SparqlResult }>();
 
 export async function runSparql(
@@ -132,7 +148,11 @@ export async function runSparql(
   const cacheKey = `${endpoint}\u0000${guarded}`;
   const hit = cache.get(cacheKey);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
-    return { ...hit.result, truncated: hit.result.rows.length >= limit };
+    return {
+      ...hit.result,
+      rows: hit.result.rows.map((row) => ({ ...row })),
+      truncated: hit.result.rows.length >= limit,
+    };
   }
   const { timeoutMs = 30000, signal } = options;
   const timeout = AbortSignal.timeout(timeoutMs);
@@ -182,12 +202,19 @@ export async function runSparql(
   });
 
   const result: SparqlResult = { vars, rows, truncated: rows.length >= limit, limit };
-  if (cache.size >= CACHE_MAX) {
+  while (cache.size >= CACHE_MAX || cachedRows() + rows.length > CACHE_MAX_ROWS) {
     const oldest = [...cache.entries()].sort((left, right) => left[1].at - right[1].at)[0];
-    if (oldest) cache.delete(oldest[0]);
+    if (!oldest) break;
+    cache.delete(oldest[0]);
   }
   cache.set(cacheKey, { at: Date.now(), result });
   return result;
+}
+
+function cachedRows(): number {
+  let total = 0;
+  for (const entry of cache.values()) total += entry.result.rows.length;
+  return total;
 }
 
 async function readCapped(response: Response, maxBytes: number): Promise<string> {

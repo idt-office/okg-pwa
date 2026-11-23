@@ -270,3 +270,30 @@ describe("toCompactTable", () => {
     );
   });
 });
+
+describe("guardSparql: LIMIT mit OFFSET und Literalen", () => {
+  it("lässt LIMIT mit OFFSET unangetastet", () => {
+    const query = "SELECT ?x WHERE { ?x ?p ?o } LIMIT 20 OFFSET 5";
+    expect(guardSparql(query)).toBe(query);
+    expect(appliedLimit(query)).toBe(20);
+  });
+
+  it("deckelt ein LIMIT mit OFFSET", () => {
+    const guarded = guardSparql("SELECT ?x WHERE { ?x ?p ?o } LIMIT 5000 OFFSET 5");
+    expect(guarded).toContain("LIMIT 1000 OFFSET 5");
+  });
+
+  it("verschluckt kein LIMIT hinter einem Literal mit Raute", () => {
+    const query = 'ASK { ?s ?p "x#" } LIMIT 1';
+    expect(guardSparql(query)).toBe(query);
+  });
+
+  it("verschluckt kein LIMIT hinter einer IRI mit Raute", () => {
+    const query = "ASK { ?s <http://example.org/a#b> ?o } LIMIT 1";
+    expect(guardSparql(query)).toBe(query);
+  });
+
+  it("erkennt einen abschließenden Kommentar auch nach einem Literal", () => {
+    expect(stripTrailingComments('ASK { ?s ?p "x#" } # Ende')).toBe('ASK { ?s ?p "x#" }');
+  });
+});

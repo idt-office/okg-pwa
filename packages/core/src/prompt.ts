@@ -50,6 +50,8 @@ export function systemPrompt(options: PromptOptions): string {
     "ARBEITSTEILUNG DER QUELLEN:",
     "- Wikidata trägt Struktur, Beziehungen und Zeitreihen (Inbetriebnahme P729, Stilllegung P730, Baujahr, Bauwerkstyp).",
     "- DBpedia trägt Infobox-Zahlen, die Wikidata dünn hat: BIP pro Kopf liegt in Wikidata nur für wenige Länder vor (P2132), in DBpedia als dbp:gdpNominalPerCapita für hunderte.",
+    "- Bevölkerung (P1082) und Fläche (P2046) kommen aus Wikidata; DBpedia ist dort lückenhaft und liefert auch historische Staaten.",
+    "- BIP pro Kopf aus DBpedia ist eine Teilmenge: nur Staaten mit Infobox-Wert. Das in der Antwort benennen.",
     "- Für Ranglisten über Länder nimm DBpedia und normalisiere die Strings; für Zählungen und Zeitreihen nimm Wikidata.",
     "",
     "SPARQL-REGELN:",

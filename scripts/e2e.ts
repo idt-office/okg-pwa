@@ -19,6 +19,8 @@ interface Case {
     chart: boolean;
     /** Muss in der Antwort stehen, sonst ist sie inhaltlich falsch. */
     answer?: RegExp;
+    /** Darf nicht dastehen: ein Verband als Land, ein Diagramm ohne Bild. */
+    notAnswer?: RegExp;
   };
 }
 
@@ -36,7 +38,12 @@ const cases: Case[] = [
     enrich: true,
     // Die Spitzengruppe sind Steueroasen; steht keine davon oben, wurde
     // lexikografisch sortiert (Australien, Ungarn, Tschechien).
-    expect: { tools: true, chart: true, answer: /Monaco|Liechtenstein|Luxemburg/ },
+    expect: {
+      tools: true,
+      chart: true,
+      answer: /Monaco|Liechtenstein|Luxemburg/,
+      notAnswer: /EFTA|European Free Trade/,
+    },
   },
   {
     id: 3,
@@ -121,6 +128,9 @@ for (const testCase of selected) {
   }
   if (testCase.expect.answer && !testCase.expect.answer.test(text)) {
     problems.push(`Antwort enthält ${testCase.expect.answer} nicht`);
+  }
+  if (testCase.expect.notAnswer?.test(text)) {
+    problems.push(`Antwort nennt ${testCase.expect.notAnswer}, das ist kein Land`);
   }
   if (errors > 0) problems.push(`${errors} Fehlerereignis(se)`);
 

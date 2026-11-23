@@ -66,7 +66,7 @@ greift auf der Socket-Adresse; steht der BFF hinter einem Reverse Proxy, mit
 | `wikidata_entity` | `wbgetentities` | Fakten einer Entität, Mengen mit Einheit, Zeitangaben |
 | `wikidata_ranking` | `query.wikidata.org` | Rangliste einer Klasse nach Zahlenwert, numerisch sortiert |
 | `wikidata_timeline` | `query.wikidata.org` | Ereignisse je Jahr (z. B. Inbetriebnahme, Stilllegung) |
-| `dbpedia_ranking` | `dbpedia.org/sparql` | Infobox-Ranglisten, numerisch sortiert und dedupliziert |
+| `dbpedia_ranking` | `dbpedia.org/sparql` | Infobox-Ranglisten, numerisch sortiert, nur Staaten mit Hauptstadt |
 | `wikidata_sparql` | `query.wikidata.org` | Freie lesende Abfrage, Notausgang für alles andere |
 | `dbpedia_lookup` | `lookup.dbpedia.org` | Kurzbeschreibung und Typen |
 | `dbpedia_sparql` | `dbpedia.org/sparql` | Infobox-Zahlen, vor allem BIP pro Kopf |
@@ -81,7 +81,7 @@ werden im Rumpf maskiert, bevor der Block gebaut wird.
 ## Prüfen
 
 ```bash
-npm test          # 124 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
+npm test          # 132 Unit-Tests im Kern, 13 fuer den BFF, ohne Netz
 npm run typecheck
 npm run e2e       # fünf Abnahmefälle gegen die echten Endpunkte
 ```

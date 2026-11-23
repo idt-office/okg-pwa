@@ -237,3 +237,18 @@ describe("Query-Builder der kuratierten Werkzeuge", () => {
     expect(() => dbpediaRankingQuery("dbp:x } DROP", 5)).toThrow(/dbp:name/);
   });
 });
+
+describe("dbpedia_ranking", () => {
+  it("lässt nur Staaten mit Hauptstadt zu, damit kein Verband in der Liste steht", () => {
+    const query = dbpediaRankingQuery("dbp:gdpNominalPerCapita", 10);
+    expect(query).toContain("FILTER EXISTS { ?item dbo:capital ?capital }");
+  });
+
+  it("erlaubt auch dbo-Properties", () => {
+    expect(() => dbpediaRankingQuery("dbo:populationTotal", 5)).not.toThrow();
+  });
+
+  it("weist Namen mit Zusatz ab", () => {
+    expect(() => dbpediaRankingQuery("dbp:x } DROP", 5)).toThrow(/dbp:name/);
+  });
+});

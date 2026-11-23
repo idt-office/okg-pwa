@@ -89,7 +89,7 @@ export const toolDefs: ToolDefinition[] = [
     function: {
       name: "dbpedia_ranking",
       description:
-        "Rangliste aus DBpedia-Infoboxen, numerisch sortiert und dedupliziert. Werte sind Strings mit Einheiten; dieser Aufruf wandelt sie um, woran eine eigene Abfrage regelmaessig scheitert. Beispiel: property dbp:gdpNominalPerCapita.",
+        "Rangliste aus DBpedia-Infoboxen, numerisch sortiert und dedupliziert. Nur fuer Kennzahlen, die Wikidata duenn hat, vor allem BIP pro Kopf (dbp:gdpNominalPerCapita). Nicht fuer Bevoelkerung oder Flaeche: dort ist die Quelle lueckenhaft, dafuer wikidata_ranking mit P1082 oder P2046.",
       parameters: {
         type: "object",
         properties: {
@@ -227,12 +227,13 @@ export function timelineQuery(classId: string, propertyId: string): string {
 
 /** Baut die DBpedia-Rangliste mit numerischer Sortierung und Dedupe. */
 export function dbpediaRankingQuery(property: string, limit: number): string {
-  if (!/^dbp:[A-Za-z0-9_]+$/.test(property)) {
-    throw new Error("property muss die Form dbp:name haben.");
+  if (!/^(dbp|dbo):[A-Za-z0-9_]+$/.test(property)) {
+    throw new Error("property muss die Form dbp:name oder dbo:name haben.");
   }
   return [
     `SELECT ?label (MAX(?value) AS ?wert) WHERE {`,
     `  ?item a dbo:Country ; ${property} ?raw .`,
+    `  FILTER EXISTS { ?item dbo:capital ?capital }`,
     `  BIND(xsd:decimal(REPLACE(STR(?raw), ",", "")) AS ?value)`,
     `  FILTER(?value > 0)`,
     `  ?item rdfs:label ?label . FILTER(lang(?label) = "en")`,
@@ -262,8 +263,16 @@ async function wikidataTimeline(args: Record<string, unknown>, runtime: ToolRunt
 }
 
 async function dbpediaRanking(args: Record<string, unknown>, runtime: ToolRuntime): Promise<ToolResult> {
-  const query = dbpediaRankingQuery(String(args.property ?? ""), Number(args.limit ?? 10));
-  return runCuratedQuery("dbpedia_sparql", query, runtime, "Rangliste");
+  const property = String(args.property ?? "");
+  const query = dbpediaRankingQuery(property, Number(args.limit ?? 10));
+  const result = await runCuratedQuery("dbpedia_sparql", query, runtime, "Rangliste");
+  if (!result.ok) return result;
+  // Die Quelle deckt nicht alle Staaten ab; das gehoert in die Antwort, sonst
+  // liest sich eine Teilmenge wie eine vollstaendige Rangliste.
+  return {
+    ...result,
+    content: `${result.content}\nHinweis: nur Staaten, fuer die DBpedia ${property} in der Infobox fuehrt. Fehlende Staaten bedeuten "kein Wert in der Quelle", nicht "Wert null". Fuer Bevoelkerung und Flaeche ist wikidata_ranking die bessere Quelle.`,
+  };
 }
 
 async function runCuratedQuery(
@@ -281,7 +290,7 @@ async function runCuratedQuery(
  * Zwei Syntaxfehler treten bei Wikidata-Abfragen immer wieder auf. Der
  * Fehlertext des Endpunkts nennt sie, sagt aber nicht, was zu tun ist.
  */
-export function correctionHint(message: string): string | undefined {
+export function correctionHint(message: string, tool?: string): string | undefined {
   if (/encountered\s+"[^"]*"\s*"?service"?/i.test(message)) {
     return "Hinweis: SERVICE wikibase:label muss innerhalb der geschweiften Klammern der WHERE-Klausel stehen, nicht dahinter.";
   }
@@ -292,7 +301,9 @@ export function correctionHint(message: string): string | undefined {
     return "Hinweis: Der Endpunkt drosselt gerade. Wiederhole die Abfrage nicht sofort; antworte notfalls mit dem, was schon da ist.";
   }
   if (/zeitüberschreitung|timeout|timed out/i.test(message)) {
-    return "Hinweis: Die Abfrage war zu langsam. Nimm eine konkrete Klasse ohne tiefe P279*-Pfade, filtere frueher und setze ein kleineres LIMIT.";
+    return tool?.includes("dbpedia")
+      ? "Hinweis: Die DBpedia-Abfrage war zu langsam. Weniger Zeilen, konkrete Property, kein ORDER BY ueber alle Staaten."
+      : "Hinweis: Die Abfrage war zu langsam. Nimm eine konkrete Klasse ohne tiefe P279*-Pfade, filtere frueher und setze ein kleineres LIMIT.";
   }
   return undefined;
 }
@@ -369,7 +380,7 @@ export async function executeTool(
     }
   } catch (error) {
     const message = describeError(error);
-    const hint = correctionHint(message);
+    const hint = correctionHint(message, name);
     return { content: toolError(`Fehler: ${message}${hint ? `\n${hint}` : ""}`), ok: false };
   }
 }
