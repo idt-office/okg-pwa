@@ -14,17 +14,35 @@ export async function fetchJson<T>(url: string, options: FetchOptions = {}): Pro
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
+  const request = (): Promise<Response> =>
+    fetch(url, {
       signal: combined,
       headers: {
         "user-agent": USER_AGENT,
         accept: "application/json",
       },
     });
-  } catch (error) {
-    throw new Error(`Anfrage fehlgeschlagen (${url}): ${describeError(error)}`);
+
+  let response: Response | undefined;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await request();
+      if (response.status >= 502 && response.status <= 504 && attempt === 0) {
+        await backoff();
+        continue;
+      }
+      break;
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted || !isTransportError(error) || attempt === 1) {
+        throw new Error(`Anfrage fehlgeschlagen (${url}): ${describeError(error)}`);
+      }
+      await backoff();
+    }
+  }
+  if (!response) {
+    throw new Error(`Anfrage fehlgeschlagen (${url}): ${describeError(lastError)}`);
   }
 
   if (!response.ok) {
@@ -56,4 +74,17 @@ export function describeError(error: unknown): string {
     return error.name === "TimeoutError" ? "Zeitüberschreitung" : error.message;
   }
   return String(error);
+}
+
+/** Netzwerkaussetzer, keine fachlichen Fehler. */
+export function isTransportError(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return /fetch failed|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network|other side closed/i.test(
+    message,
+  );
+}
+
+/** Kurze Pause vor dem zweiten Versuch; ein Aussetzer braucht einen Moment. */
+export function backoff(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 1200));
 }

@@ -269,6 +269,33 @@ describe("runSparql", () => {
     expect(calls).toBe(1);
   });
 
+  it("wiederholt einen 503 einmal", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls += 1;
+      if (calls === 1) return new Response("weg", { status: 503 });
+      return new Response(
+        JSON.stringify({ head: { vars: ["a"] }, results: { bindings: [{ a: { value: "1" } }] } }),
+        { status: 200 },
+      );
+    });
+    const result = await runSparql(endpoint, "SELECT ?a WHERE { ?a ?p ?o } # 503-retry");
+    expect(calls).toBe(2);
+    expect(result.rows).toEqual([{ a: "1" }]);
+  });
+
+  it("gibt nach zwei 503 auf", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls += 1;
+      return new Response("weg", { status: 503 });
+    });
+    await expect(
+      runSparql(endpoint, "SELECT ?a WHERE { ?a ?p ?o } # 503-zweimal"),
+    ).rejects.toThrow(/503/);
+    expect(calls).toBe(2);
+  });
+
   it("gibt auch beim ersten Aufruf eine Kopie der Zeilen zurück", async () => {
     vi.stubGlobal("fetch", async () =>
       new Response(

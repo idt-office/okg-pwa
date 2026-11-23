@@ -52,7 +52,7 @@ const cases: Case[] = [
         others:
           /Liechtenstein|Luxemburg|Luxembourg|Irland|Ireland|Schweiz|Switzerland|Katar|Qatar|Australien|Neuseeland|Ungarn|Tschechien|Spanien|Singapur|Singapore/i,
       },
-      notAnswer: /European Free Trade|Freihandelsassoziation/i,
+      notAnswer: /EFTA|European Free Trade|Freihandelsassoziation/i,
     },
   },
   {
@@ -141,11 +141,21 @@ for (const testCase of selected) {
   }
   if (testCase.expect.rankFirst) {
     const { name, others } = testCase.expect.rankFirst;
-    const first = name.exec(text);
-    const other = others.exec(text);
+    const flat = text.replace(/\s+/g, " ");
+    const first = name.exec(flat);
+    const other = others.exec(flat);
+    // "Monaco ist in Wikidata nicht erfasst" ist keine Spitze, sondern ein Haken.
+    const hedged = new RegExp(
+      `${name.source}[^.;]{0,40}(nicht erfasst|nicht enthalten|fehlt|keine Daten|nicht in den Daten)`,
+      "i",
+    ).test(flat);
     if (!first) problems.push(`Antwort nennt ${name} nicht`);
-    else if (other && other.index < first.index) {
+    else if (first.index > 200) {
+      problems.push(`Antwort nennt ${name} erst nach ${first.index} Zeichen, nicht als Spitze`);
+    } else if (other && other.index < first.index) {
       problems.push(`Antwort nennt ${other[0]} vor ${first[0]}, die Rangliste stimmt nicht`);
+    } else if (hedged) {
+      problems.push(`Antwort nennt ${name} nur mit Einschränkung`);
     }
   }
   if (testCase.expect.notAnswer?.test(text)) {

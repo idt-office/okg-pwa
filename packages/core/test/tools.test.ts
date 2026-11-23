@@ -201,6 +201,25 @@ describe("correctionHint bei Drosselung", () => {
   });
 });
 
+describe("correctionHint bei Ausfall", () => {
+  it("nennt den nicht erreichbaren Endpunkt", () => {
+    const hint = correctionHint("SPARQL-Anfrage fehlgeschlagen: fetch failed", "dbpedia_ranking");
+    expect(hint).toContain("dbpedia.org ist gerade nicht erreichbar");
+  });
+
+  it("schickt die BIP-Frage nicht auf eine lückenhafte Ersatzquelle", () => {
+    const hint = correctionHint("SPARQL-Anfrage fehlgeschlagen: fetch failed", "dbpedia_ranking");
+    expect(hint).not.toContain("wikidata_ranking");
+    expect(hint).toContain("keine Ersatzrangliste");
+  });
+
+  it("nennt bei Wikidata den Wikidata-Endpunkt", () => {
+    expect(correctionHint("fetch failed", "wikidata_sparql")).toContain(
+      "query.wikidata.org ist gerade nicht erreichbar",
+    );
+  });
+});
+
 describe("Query-Builder der kuratierten Werkzeuge", () => {
   it("baut eine numerisch sortierte Rangliste", () => {
     const query = rankingQuery("q339353", "p2109", "Q183", 5);

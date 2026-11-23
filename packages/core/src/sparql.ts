@@ -1,4 +1,4 @@
-import { describeError, USER_AGENT } from "./http.js";
+import { backoff, describeError, isTransportError, USER_AGENT } from "./http.js";
 
 export const WIKIDATA_SPARQL = "https://query.wikidata.org/sparql";
 export const DBPEDIA_SPARQL = "https://dbpedia.org/sparql";
@@ -179,7 +179,7 @@ export async function runSparql(
       response = await request();
       // Nur echte Aussetzer des Servers werden wiederholt, kein 400.
       if (response.status >= 502 && response.status <= 504 && attempt === 0) {
-        await backoff(attempt);
+        await backoff();
         continue;
       }
       break;
@@ -189,7 +189,7 @@ export async function runSparql(
       if (signal?.aborted || !isTransportError(error) || attempt === 1) {
         throw new Error(`SPARQL-Anfrage fehlgeschlagen: ${describeError(error)}`);
       }
-      await backoff(attempt);
+      await backoff();
     }
   }
   if (!response) {
@@ -236,18 +236,6 @@ export async function runSparql(
   }
   // Der Cache und der Aufrufer teilen keine Arrays.
   return { ...result, rows: result.rows.map((row) => ({ ...row })) };
-}
-
-/** Netzwerkaussetzer, keine fachlichen Fehler. */
-export function isTransportError(error: unknown): boolean {
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  return /fetch failed|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network|other side closed/i.test(
-    message,
-  );
-}
-
-function backoff(attempt: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
 }
 
 function cachedRows(): number {

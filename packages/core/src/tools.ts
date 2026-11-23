@@ -301,9 +301,10 @@ export function correctionHint(message: string, tool?: string): string | undefin
     return "Hinweis: Der Endpunkt drosselt gerade. Wiederhole die Abfrage nicht sofort; antworte notfalls mit dem, was schon da ist.";
   }
   if (/fetch failed|ECONNRESET|ECONNREFUSED|socket hang up|network|other side closed/i.test(message)) {
-    return tool?.includes("dbpedia")
-      ? "Hinweis: dbpedia.org ist gerade nicht erreichbar. Nimm fuer diese Frage die Wikidata-Quelle (wikidata_ranking, wikidata_timeline, wikidata_sparql), statt den Aufruf zu wiederholen."
-      : "Hinweis: query.wikidata.org ist gerade nicht erreichbar. Wiederhole den Aufruf nicht sofort; nutze die andere Quelle oder antworte mit dem, was schon da ist.";
+    // Keine Ersatzquelle empfehlen: fuer BIP pro Kopf etwa ist Wikidata P2132
+    // eine Teilmenge, eine Ausweichrangliste waere nachweislich falsch.
+    const source = tool?.includes("dbpedia") ? "dbpedia.org" : "query.wikidata.org";
+    return `Hinweis: ${source} ist gerade nicht erreichbar; der Aufruf wurde bereits einmal wiederholt. Wenn die Frage ohne diese Quelle nicht beantwortbar ist, sage den Ausfall und liefere keine Ersatzrangliste aus einer lueckenhaften anderen Quelle.`;
   }
   if (/zeitüberschreitung|timeout|timed out/i.test(message)) {
     return tool?.includes("dbpedia")
