@@ -61,6 +61,7 @@ export async function* runAgent(
 
   try {
     while (rounds < cfg.maxRounds) {
+      if (signal?.aborted) return;
       const remaining = deadline - Date.now();
       if (remaining < 3000) {
         truncated = true;
@@ -119,6 +120,8 @@ export async function* runAgent(
         break;
       }
     }
+
+    if (signal?.aborted) return;
 
     const lastMessage = messages[messages.length - 1];
     const needsFinalAnswer =

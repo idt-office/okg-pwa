@@ -31,7 +31,4 @@ COPY --from=build /app/packages/web/dist packages/web/dist
 USER node
 EXPOSE 8787
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/api/health" > /dev/null || exit 1
-
 CMD ["npx", "tsx", "packages/bff/src/index.ts"]

@@ -486,7 +486,7 @@ function toolList(tools: ToolTrace[]): string {
 function sourceList(sources: Source[]): string {
   const items = sources
     .map((source) => {
-      const href = source.url.startsWith("http") ? source.url : "#";
+      const href = /^https?:\/\//.test(source.url) ? source.url : "#";
       const label = escapeHtml(source.label);
       const query = source.query
         ? `<details><summary>SPARQL</summary><pre>${escapeHtml(source.query)}</pre></details>`

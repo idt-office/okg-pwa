@@ -72,7 +72,7 @@ zu behandeln.
 ## Prüfen
 
 ```bash
-npm test          # 66 Unit-Tests gegen aufgezeichnete Antworten, ohne Netz
+npm test          # 71 Unit-Tests gegen aufgezeichnete Antworten und ein Modell-Attrappen, ohne Netz
 npm run typecheck
 npm run e2e       # fünf Abnahmefälle gegen die echten Endpunkte
 ```

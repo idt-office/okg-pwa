@@ -44,6 +44,11 @@ const RATE_LIMIT = 15;
 const RATE_WINDOW_MS = 60_000;
 
 app.use("/api/*", async (c, next) => {
+  if (c.req.method === "OPTIONS") {
+    // Preflights zählen nicht gegen das Limit, sonst halbiert sich das Kontingent.
+    await next();
+    return;
+  }
   const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
   const now = Date.now();
   const entry = hits.get(ip);
