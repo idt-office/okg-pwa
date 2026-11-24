@@ -125,5 +125,6 @@ node scripts/record-fixtures.mjs
   Quelle eine Ersatzrangliste zu bauen.
 - Der Verlauf liegt in IndexedDB im Browser, nicht auf dem Server.
 
-Entscheidungen und Messwerte, die zu diesem Aufbau geführt haben:
-[docs/architektur.md](docs/architektur.md).
+Entscheidungen und ihre Begründung: [docs/architektur.md](docs/architektur.md).
+Erkenntnisse aus dem Bau, gemessene Grenzen und offene Fäden:
+[docs/erkenntnisse.md](docs/erkenntnisse.md).

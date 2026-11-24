@@ -2,7 +2,8 @@
 
 Dieses Dokument hält fest, warum der Aufbau so aussieht. Es ist kein Changelog,
 sondern die Begründung der tragenden Entscheidungen, jeweils mit dem Messwert,
-der sie ausgelöst hat.
+der sie ausgelöst hat. Die Beobachtungen aus dem Betrieb (Datenqualität,
+Modellverhalten, offene Fäden) stehen in [erkenntnisse.md](erkenntnisse.md).
 
 ## Rollen
 
